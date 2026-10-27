@@ -132,22 +132,24 @@ export class AnthropicProvider {
     explain(e) {
         if (e instanceof Anthropic.APIUserAbortError)
             return e;
+        // The API's own message, without the status and raw JSON the SDK wraps it in.
+        const said = e instanceof Anthropic.APIError ? (e.error?.error?.message ?? e.message) : "";
         const where = this.options.baseUrl ? ` at ${this.options.baseUrl}` : "";
         const keyHelp = `Set ${this.options.apiKeyEnv}${this.options.apiKeyEnv === "ANTHROPIC_API_KEY" ? "" : " (providers.anthropic.apiKeyEnv)"}, or run \`ant auth login\`.`;
         if (e instanceof Anthropic.AuthenticationError)
             return new ProviderError(`Anthropic didn't accept the credentials (401). ${keyHelp}`);
         if (e instanceof Anthropic.PermissionDeniedError)
-            return new ProviderError(`These credentials may not use ${this.model} (403): ${e.message}`);
+            return new ProviderError(`These credentials may not use ${this.model} (403): ${said}`);
         if (e instanceof Anthropic.NotFoundError)
             return new ProviderError(`Anthropic has no model "${this.model}" (404). \`maquette models\` lists them.`);
         if (e instanceof Anthropic.RateLimitError)
             return new ProviderError("Anthropic is rate-limiting these requests (429). Try again shortly.");
         if (e instanceof Anthropic.BadRequestError)
-            return new ProviderError(`Anthropic refused the request (400): ${e.message}`);
+            return new ProviderError(`Anthropic refused the request (400): ${said}`);
         if (e instanceof Anthropic.APIConnectionError)
             return new ProviderError(`Can't reach the Claude API${where}: ${e.message}`);
         if (e instanceof Anthropic.APIError)
-            return new ProviderError(`The Claude API failed (${e.status ?? "no status"}): ${e.message}`);
+            return new ProviderError(`The Claude API failed (${e.status ?? "no status"}): ${said}`);
         if (e instanceof Error && /resolve authentication method/.test(e.message))
             return new ProviderError(`No Anthropic credentials found. ${keyHelp}`);
         return e instanceof Error ? e : new Error(String(e));

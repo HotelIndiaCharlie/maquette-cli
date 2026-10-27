@@ -93,12 +93,15 @@ test("lists models, and explains errors", async () => {
   const server = await mock((s, res) =>
     s.url.startsWith("/v1/models")
       ? json(res, 200, { data: [{ type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5", created_at: "2026-09-01T00:00:00Z" }], has_more: false, first_id: "claude-opus-5-5", last_id: "claude-opus-5-5" })
+      : s.body.model === "claude-bad-image"
+        ? json(res, 400, { type: "error", error: { type: "invalid_request_error", message: "messages.0.content.0.image.source.base64: The image was specified using the image/png media type, but the image appears to be a image/jpeg image" }, request_id: "req_1" })
       : s.body.model === "claude-nope"
         ? json(res, 404, { type: "error", error: { type: "not_found_error", message: "model: claude-nope" } })
         : json(res, 401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }),
   );
   assert.deepEqual(await new AnthropicProvider(undefined, options(server.url)).models(), [{ id: "claude-opus-5-5", name: "Claude Opus 5.5" }]);
   const ask = (model?: string) => drain(new AnthropicProvider(model, options(server.url)).chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] }));
+  await assert.rejects(ask("claude-bad-image"), (e: Error) => e.message === "Anthropic refused the request (400): messages.0.content.0.image.source.base64: The image was specified using the image/png media type, but the image appears to be a image/jpeg image");
   await assert.rejects(ask("claude-nope"), /Anthropic has no model "claude-nope" \(404\)/);
   await assert.rejects(ask(), (e: Error) => e instanceof ProviderError && /didn't accept the credentials \(401\)\. Set MAQUETTE_TEST_ANTHROPIC_KEY \(providers.anthropic.apiKeyEnv\)/.test(e.message));
   await server.close();

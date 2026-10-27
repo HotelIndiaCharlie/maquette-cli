@@ -12,6 +12,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { clearLine, createInterface, cursorTo } from "node:readline";
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import { imageType } from "./images.js";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.js";
 import { createProvider, defaultModels } from "./providers/index.js";
 import { defaults, ensure, load, parse, schema, SettingsError, write } from "./settings.js";
@@ -682,7 +683,6 @@ function askPrompt(running) {
             : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
     ].join("\n\n");
 }
-const mediaTypes = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
 async function ask(tokens) {
     let text = tokens.join(" ").trim();
     if (text === "-" || (!text && !process.stdin.isTTY))
@@ -691,10 +691,11 @@ async function ask(tokens) {
         fail('What should Maquette ask? maquette ask "<message>", or pipe the message in.');
     const parts = imageFlags.map((p) => {
         const path = resolve(p.replace(/^~(?=\/|$)/, homedir()));
-        const mediaType = mediaTypes[extname(path).toLowerCase()] ?? fail(`--image ${p}: Maquette can show the model PNG, JPEG, GIF or WebP images.`);
         if (!existsSync(path))
             fail(`--image ${p}: there's no such file.`);
-        return { type: "image", mediaType, data: readFileSync(path).toString("base64"), path };
+        const bytes = readFileSync(path);
+        const mediaType = imageType(bytes) ?? fail(`--image ${p}: that isn't a PNG, JPEG, GIF or WebP image, which are what models can see.`);
+        return { type: "image", mediaType, data: bytes.toString("base64"), path };
     });
     parts.push({ type: "text", text });
     const provider = createProvider(settings);

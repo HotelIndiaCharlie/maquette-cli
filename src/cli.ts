@@ -13,6 +13,7 @@ import { clearLine, createInterface, cursorTo, type Interface } from "node:readl
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import type { ToolResult } from "./designcraft.ts";
+import { imageType } from "./images.ts";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.ts";
 import { createProvider, defaultModels, type ImagePart, type TextPart } from "./providers/index.ts";
 import { defaults, ensure, type Loaded, load, parse, schema, SettingsError, write } from "./settings.ts";
@@ -626,17 +627,16 @@ function askPrompt(running?: { root: string; instructions: string; tools: Tool[]
   ].join("\n\n");
 }
 
-const mediaTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
-
 async function ask(tokens: string[]) {
   let text = tokens.join(" ").trim();
   if (text === "-" || (!text && !process.stdin.isTTY)) text = (await readAll(process.stdin)).trim();
   if (!text) fail('What should Maquette ask? maquette ask "<message>", or pipe the message in.');
   const parts: (TextPart | ImagePart)[] = imageFlags.map((p) => {
     const path = resolve(p.replace(/^~(?=\/|$)/, homedir()));
-    const mediaType = mediaTypes[extname(path).toLowerCase()] ?? fail(`--image ${p}: Maquette can show the model PNG, JPEG, GIF or WebP images.`);
     if (!existsSync(path)) fail(`--image ${p}: there's no such file.`);
-    return { type: "image", mediaType, data: readFileSync(path).toString("base64"), path };
+    const bytes = readFileSync(path);
+    const mediaType = imageType(bytes) ?? fail(`--image ${p}: that isn't a PNG, JPEG, GIF or WebP image, which are what models can see.`);
+    return { type: "image", mediaType, data: bytes.toString("base64"), path };
   });
   parts.push({ type: "text", text });
   const provider = createProvider(settings);

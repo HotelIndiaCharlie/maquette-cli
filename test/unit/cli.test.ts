@@ -87,6 +87,9 @@ test("ask reads the message from stdin, shows the model an image, and fails on a
   const base = mkdtempSync(join(tmpdir(), "maquette-cli-"));
   mkdirSync(join(base, "home"));
   writeFileSync(join(base, "page.png"), Buffer.from("89504e470d0a1a0a", "hex"));
+  // A JPEG saved as .png, as image generators often do.
+  writeFileSync(join(base, "cover.png"), Buffer.from("ffd8ffe000104a464946", "hex"));
+  writeFileSync(join(base, "notes.png"), "not an image");
   const env = { MAQUETTE_PROVIDER: "openai-compatible", MAQUETTE_MODEL: "llava", OPENAI_BASE_URL: server.url, MAQUETTE_PORT: String(await closedPort()) };
   const r = await runIn(base, join(base, "home"), ["ask", "--image", "page.png", "-"], env, "What's on this page?\n");
   assert.equal(r.code, 1);
@@ -96,6 +99,10 @@ test("ask reads the message from stdin, shows the model an image, and fails on a
   assert.deepEqual(chat.body.messages[1].content, [{ type: "text", text: "What's on this page?" }, { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }]);
   const missing = await runIn(base, join(base, "home"), ["ask", "--image", "nope.gif", "hi"], env);
   assert.match(missing.stderr, /--image nope.gif: there's no such file\./);
+  const fake = await runIn(base, join(base, "home"), ["ask", "--image", "notes.png", "hi"], env);
+  assert.match(fake.stderr, /--image notes.png: that isn't a PNG, JPEG, GIF or WebP image/);
+  await runIn(base, join(base, "home"), ["ask", "--image", "cover.png", "hi"], env);
+  assert.equal(server.seen.at(-1)!.body.messages[1].content[1].image_url.url, "data:image/jpeg;base64,/9j/4AAQSkZJRg==");
 });
 
 test("models lists what the server offers and marks the one in use", async () => {
