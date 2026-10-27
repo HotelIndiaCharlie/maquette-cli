@@ -18,7 +18,7 @@ import { createProvider, defaultModels } from "./providers/index.js";
 import { defaults, ensure, load, parse, schema, SettingsError, write } from "./settings.js";
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
-const usage = `Usage:
+const usage = `Usage (mqt is short for maquette and takes the same commands):
   maquette                               start DesignCraft in this folder, with a prompt to type tool calls
   maquette call <tool> [--flag value …]  call a tool on the running Maquette
   maquette tools [<tool>]                list the tools, or show one tool's flags

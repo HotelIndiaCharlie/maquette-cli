@@ -4,7 +4,8 @@
   "description": "One shared DesignCraft for every session: a prompt in your terminal, tool calls with --flags, and coarse tools such as charts",
   "type": "module",
   "bin": {
-    "maquette": "dist/cli.js"
+    "maquette": "dist/cli.js",
+    "mqt": "dist/cli.js"
   },
   "files": [
     "dist",

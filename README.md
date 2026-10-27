@@ -35,6 +35,8 @@ You need macOS and Node 24 or later.
 npm install -g https://github.com/HotelIndiaCharlie/maquette-cli/tarball/main
 ```
 
+It installs two names for the same command: `maquette`, and `mqt` for short. Everything in this README works with either, such as `mqt ask "…"` or `mqt config`.
+
 The shorter `npm install -g github:HotelIndiaCharlie/maquette-cli` hits a bug in global installs from git in npm 10 and 11. It leaves `maquette` pointing at a temporary folder that npm has already deleted, so use the tarball URL above.
 
 The first time you run `maquette`, it checks for the **DesignCraft CLI**, DesignCraft's headless engine. If it isn't there, Maquette says so and offers to install it. It downloads only the CLI (101 MB) from DesignCraft's GitHub release, never the desktop app. It checks the download against the SHA-256 pinned in [`designcraft-pin.json`](designcraft-pin.json) and keeps the CLI in `~/.maquette/designcraft/<version>/`. You can also install it ahead of time:
