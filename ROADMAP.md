@@ -55,9 +55,9 @@ The foundation everything else reads from.
 
 **Done when:** `maquette ask "what tools do you have"` prints a streamed answer from Anthropic, and the same command with `MAQUETTE_PROVIDER=openai-compatible` and Ollama running does too.
 
-### Phase 2: The agent loop at the prompt
+### Phase 2: The agent loop and the Ink terminal UI
 
-This is the phase that makes it an AI terminal.
+This is the phase that makes it an AI terminal. Tracked in Linear as HOT-52.
 
 - **Routing a typed line.** If the first word is a tool name or a prompt command, it's a direct call, as today. If it starts with `/`, it's a slash command. If it starts with `!`, it's a shell command run in Maquette's folder, output shown in the terminal and kept in the conversation so the model can see it. Anything else is a message to the model.
 - **The loop** (`src/agent/loop.ts`): send history plus tool list to the provider; for each `tool_call`, run it through the existing `enqueue()` so it's serialised with HTTP callers and gets the same log line (time, call number, tool, args, ok/error, duration, image path); append the result; repeat until the model stops. Tool results with images go back to the model as images, so a vision-capable model can look at its own renders.
@@ -68,7 +68,16 @@ This is the phase that makes it an AI terminal.
 - **Status line** under the prompt: model, permission mode, tokens used, whether other sessions are connected over HTTP.
 - `maquette ask "<message>"` for one-shot, non-interactive use from scripts and CI.
 
-**Done when:** `maquette`, then "open the example report and put the revenue chart in the first slot, then show me page one" does the whole thing, with each tool call logged and the render path printed, and nothing else open.
+**The screen is built with [Ink](https://github.com/vadimdemedes/ink) from the start**, the React-for-terminals library Claude Code uses, so the prompt is rewritten once rather than in readline and then again:
+
+- **The core knows nothing about the screen.** `src/agent/` (loop, routing, permissions) emits events (`text`, `tool_call`, `tool_result`, `ask_permission`, `notice`, `done`) and `src/ui/` draws them. The logic is tested without Ink against the fake provider, and the same events feed Phase 7's JSON mode.
+- **No JSX.** Node runs `.ts` source but not `.tsx`, and running the branch from source depends on that. Components are plain `.ts` with `React.createElement` through a one-letter `h` helper, so no build step is added.
+- **Finished output goes in Ink's `<Static>`**: written once, never redrawn. Only the live answer, the input box and the footer re-render, so long sessions stay fast.
+- **No terminal, no Ink.** Without a TTY, and for `ask`, `call` and `tools`, Maquette prints plain lines as today.
+- **Packages:** `ink@8` and `react@19.3`, `marked` for Markdown; `ink-testing-library` and `@types/react` for development. The input box is written in-house on Ink's `useInput`, for history, tab completion and Claude Code-style Ctrl-C.
+- **Components:** `Banner` (version, provider, model, effort, folder, port), `Transcript` (finished items, other sessions' calls marked `http`), `Turn` (the answer streaming in, drawn from Markdown), `ToolLine` (one line per call, `ctrl+o` expands it), `PermissionPrompt` (`y / n / a`), `InputBox` (framed, `❯`, history, Tab, shift+enter), `Footer` (`? for shortcuts`; model, effort, mode, tokens, cost), `Notices` (esc dismisses).
+
+**Done when:** `maquette`, then "open the example report and put the revenue chart in the first slot, then show me page one" does the whole thing, with each tool call logged and the render path printed, and nothing else open, in a Claude Code-style screen: input box at the bottom, footer, Markdown answers, one-line tool summaries.
 
 ### Phase 3: Built-in tools, so nothing needs a second terminal
 
@@ -121,11 +130,11 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 | Path | What it will be |
 | --- | --- |
 | `src/cli.ts` | Argument parsing and the subcommands; the prompt and server move out |
-| `src/repl.ts` | The prompt: readline, routing, slash commands, status line |
+| `src/ui/` | The Ink screen: banner, transcript, live answer, tool lines, permission prompt, input box, footer, notices |
 | `src/server.ts` | The HTTP server and the call queue (unchanged behaviour) |
 | `src/settings.ts` | Settings files, env overrides, `maquette config` |
 | `src/providers/` | `types.ts`, `anthropic.ts`, `openai-compatible.ts`, `fake.ts` |
-| `src/agent/` | `loop.ts`, `prompt.ts`, `permissions.ts`, `tools/` (bash, files, image) |
+| `src/agent/` | `loop.ts`, `routing.ts`, `prompt.ts`, `permissions.ts`, `tools/` (bash, files, image); emits the events `src/ui/` draws |
 | `src/mcp/` | `clients.ts` (servers from settings and `.mcp.json`), `serve.ts` (`maquette mcp`) |
 | `src/skills.ts` | Skill discovery and loading |
 | `src/sessions.ts` | JSONL history, resume, compaction |
@@ -137,7 +146,7 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 | --- | --- | --- |
 | 0 Settings | nothing | small |
 | 1 Providers | 0 | medium |
-| 2 Agent loop | 1 | large; the heart of it |
+| 2 Agent loop and Ink UI | 1 | large; the heart of it |
 | 3 Built-in tools | 2 | small |
 | 4 MCP servers | 2 | medium |
 | 5 Skills | 2 | small |
