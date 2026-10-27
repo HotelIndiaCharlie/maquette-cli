@@ -14,11 +14,11 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "dev": "node --experimental-strip-types --no-warnings src/cli.ts",
-    "test": "node --experimental-strip-types --no-warnings test/charts.ts"
+    "dev": "node src/cli.ts",
+    "test": "node test/charts.ts"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=24"
   },
   "repository": {
     "type": "git",
@@ -36,7 +36,7 @@
     "@types/d3-scale": "4.0.9",
     "@types/d3-time": "3.0.4",
     "@types/d3-time-format": "4.0.3",
-    "@types/node": "22.20.5",
+    "@types/node": "24.19.2",
     "typescript": "5.9.3"
   }
 }
