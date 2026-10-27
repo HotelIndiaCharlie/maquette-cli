@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "node src/cli.ts",
     "test": "node test/charts.ts",
-    "test:unit": "node --test test/unit/*.test.ts"
+    "test:unit": "node --test test/unit/*.test.ts",
+    "test:all": "npm run test:unit && npm test"
   },
   "engines": {
     "node": ">=24"

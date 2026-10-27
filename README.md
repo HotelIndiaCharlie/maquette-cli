@@ -258,6 +258,7 @@ npm install
 npm run dev          # runs src/cli.ts directly (Node 24 runs TypeScript as is); add -- call … and the rest
 npm test             # draws the five example charts through the engine and checks them
 npm run test:unit    # settings, providers and commands, against local mock servers: no DesignCraft, key or network
+npm run test:all     # both of the above
 npm run typecheck
 npm run build        # compiles src/ to dist/
 ```

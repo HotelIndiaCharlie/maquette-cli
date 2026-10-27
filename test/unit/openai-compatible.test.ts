@@ -77,8 +77,24 @@ test("tool results go back as tool messages, with their images in a user message
   assert.match(blind[0].content as string, /What's wrong with this page\?$/);
 });
 
-test("lists models from /models", async () => {
-  const server = await mock((_, res) => json(res, 200, { object: "list", data: [{ id: "llama3.1:8b" }, { id: "qwen3:14b" }] }));
+test("arguments sent as a whole object replace, rather than add to, what came before", async () => {
+  const server = await mock((_, res) =>
+    sse(res, [
+      chunk({ tool_calls: [{ index: 0, id: "c", function: { name: "render_page", arguments: { page: 0 } } }] }),
+      chunk({ tool_calls: [{ index: 0, function: { arguments: { page: 0, scale: 2 } } }] }, "tool_calls"),
+      "[DONE]",
+    ]),
+  );
+  const events = await drain(new OpenAICompatibleProvider("m", options(server.url)).chat({ system: "", messages: [] }));
+  await server.close();
+  const call = events.find((e) => e.type === "tool_call");
+  assert.ok(call?.type === "tool_call");
+  assert.deepEqual(call.call.input, { page: 0, scale: 2 });
+  assert.equal(call.call.error, undefined);
+});
+
+test("lists models from /models, leaving out entries without an id", async () => {
+  const server = await mock((_, res) => json(res, 200, { object: "list", data: [{ id: "llama3.1:8b" }, { id: "" }, null, { object: "model" }, { id: "qwen3:14b" }] }));
   assert.deepEqual(await new OpenAICompatibleProvider(undefined, options(`${server.url}/v1`)).models(), [{ id: "llama3.1:8b" }, { id: "qwen3:14b" }]);
   assert.equal(server.seen[0].url, "/v1/models");
   await server.close();

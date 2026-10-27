@@ -144,7 +144,10 @@ export class OpenAICompatibleProvider implements Provider {
         if (tc.id) at.id = tc.id;
         if (tc.function?.name) at.name += tc.function.name;
         const args = tc.function?.arguments;
-        if (args !== undefined && args !== null) at.args += typeof args === "string" ? args : JSON.stringify(args);
+        // A string is a piece of the JSON, to append; an object (as Ollama sends) is the whole
+        // set of arguments, so it replaces what came before rather than being glued on.
+        if (typeof args === "string") at.args += args;
+        else if (args !== undefined && args !== null) at.args = JSON.stringify(args);
       }
       if (choice.finish_reason) finish = choice.finish_reason;
     }
@@ -167,7 +170,9 @@ export class OpenAICompatibleProvider implements Provider {
   }
 
   async models(): Promise<ModelInfo[]> {
-    const json = (await (await this.request("/models")).json()) as { data?: { id: string }[]; models?: { name: string }[] };
-    return (json.data ?? json.models?.map((m) => ({ id: m.name })) ?? []).map((m) => ({ id: m.id }));
+    const json = (await (await this.request("/models")).json()) as { data?: { id?: unknown }[]; models?: { name?: unknown }[] };
+    const ids = json.data?.map((m) => m?.id) ?? json.models?.map((m) => m?.name) ?? [];
+    // Some local servers list entries without an id; those can't be chosen, so they're left out.
+    return ids.filter((id): id is string => typeof id === "string" && id.length > 0).map((id) => ({ id }));
   }
 }
