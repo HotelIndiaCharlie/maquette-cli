@@ -1,0 +1,43 @@
+{
+  "name": "maquette-cli",
+  "version": "0.1.0",
+  "description": "One shared DesignCraft for every session: a prompt in your terminal, tool calls with --flags, and coarse tools such as charts",
+  "type": "module",
+  "bin": {
+    "maquette": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "designcraft-pin.json"
+  ],
+  "scripts": {
+    "prepare": "tsc",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types --no-warnings src/cli.ts",
+    "test": "node --experimental-strip-types --no-warnings test/charts.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HotelIndiaCharlie/maquette-cli.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "d3-format": "3.1.2",
+    "d3-scale": "4.0.2",
+    "d3-time": "3.1.0",
+    "d3-time-format": "4.1.0"
+  },
+  "devDependencies": {
+    "@types/d3-format": "3.0.4",
+    "@types/d3-scale": "4.0.9",
+    "@types/d3-time": "3.0.4",
+    "@types/d3-time-format": "4.0.3",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

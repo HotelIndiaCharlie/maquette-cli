@@ -1,0 +1,43 @@
+{
+  "data": {
+    "url": "example/data/03-member-vs-market-price.csv"
+  },
+  "transform": [
+    {
+      "fold": [
+        "market_price_eur_t",
+        "member_price_eur_t"
+      ],
+      "as": [
+        "series",
+        "price"
+      ]
+    }
+  ],
+  "mark": "line",
+  "encoding": {
+    "x": {
+      "field": "month",
+      "type": "temporal"
+    },
+    "y": {
+      "field": "price",
+      "type": "quantitative"
+    },
+    "color": {
+      "field": "series"
+    }
+  },
+  "title": {
+    "text": "Members were shielded from the market’s swings",
+    "subtitle": "Monthly price, € per tonne"
+  },
+  "source": "Source: Larkmoor Growers’ Cooperative; regional grain exchange.",
+  "labels": {
+    "ends": true
+  },
+  "names": {
+    "market_price_eur_t": "Market price",
+    "member_price_eur_t": "Member price"
+  }
+}

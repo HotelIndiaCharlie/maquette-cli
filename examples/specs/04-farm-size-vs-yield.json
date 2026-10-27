@@ -1,0 +1,41 @@
+{
+  "data": {
+    "url": "example/data/04-farm-size-vs-yield.csv"
+  },
+  "mark": "point",
+  "encoding": {
+    "x": {
+      "field": "hectares",
+      "type": "quantitative",
+      "title": "Farm size, hectares"
+    },
+    "y": {
+      "field": "yield_t_ha",
+      "type": "quantitative",
+      "title": "Yield, tonnes per hectare"
+    },
+    "color": {
+      "field": "practice",
+      "scale": {
+        "domain": [
+          "conventional",
+          "organic"
+        ]
+      }
+    }
+  },
+  "title": {
+    "text": "Larger farms yield more; organic farms trail by over a tonne",
+    "subtitle": "Benchmarking group, 2025"
+  },
+  "source": "Source: Larkmoor Growers’ Cooperative field records.",
+  "labels": {
+    "field": "farm",
+    "top": 3,
+    "by": "hectares"
+  },
+  "names": {
+    "organic": "Organic",
+    "conventional": "Conventional"
+  }
+}

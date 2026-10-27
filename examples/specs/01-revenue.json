@@ -1,0 +1,27 @@
+{
+  "data": {
+    "url": "example/data/01-revenue.csv"
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "year",
+      "type": "ordinal"
+    },
+    "y": {
+      "field": "revenue_eur_m",
+      "type": "quantitative"
+    }
+  },
+  "title": {
+    "text": "Revenue has grown for five years in a row",
+    "subtitle": "€ million"
+  },
+  "source": "Source: Larkmoor Growers’ Cooperative. Figures for 2025 are preliminary.",
+  "highlight": [
+    2025
+  ],
+  "labels": {
+    "values": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "data": {
+    "url": "example/data/05-quarterly-operating-result.csv"
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "quarter",
+      "type": "ordinal",
+      "axis": {
+        "split": "-"
+      }
+    },
+    "y": {
+      "field": "operating_result_eur_k",
+      "type": "quantitative"
+    }
+  },
+  "title": {
+    "text": "First-quarter losses are shrinking",
+    "subtitle": "Operating result by quarter, € thousand"
+  },
+  "source": "Source: Larkmoor Growers’ Cooperative management accounts.",
+  "labels": {
+    "values": true,
+    "format": ",.0f"
+  }
+}

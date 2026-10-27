@@ -1,0 +1,13 @@
+{
+  "version": "0.13.0",
+  "tag": "v0.13.0",
+  "commit": "dcce40fb8731213c1f8e31cdd23444995afc62ce",
+  "release": "https://github.com/storytold/designcraft/releases/tag/v0.13.0",
+  "cli": {
+    "asset": "designcraft-cli-0.13.0-macos-universal.zip",
+    "url": "https://github.com/storytold/designcraft/releases/download/v0.13.0/designcraft-cli-0.13.0-macos-universal.zip",
+    "sha256": "ba49dc1699ed98f27ef8e9336a24a011f086f3d1a46c6f069c2791bf796de960",
+    "bytes": 100656024,
+    "binary": "designcraft-cli-0.13.0-macos-universal/designcraft-cli"
+  }
+}

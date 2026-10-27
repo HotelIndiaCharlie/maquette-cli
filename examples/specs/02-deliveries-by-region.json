@@ -1,0 +1,26 @@
+{
+  "data": {
+    "url": "example/data/02-deliveries-by-region.csv"
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "deliveries_kt",
+      "type": "quantitative"
+    },
+    "y": {
+      "field": "region",
+      "type": "nominal",
+      "sort": "-x"
+    }
+  },
+  "title": {
+    "text": "North Vale and Eastmere deliver two-fifths of the crop",
+    "subtitle": "Deliveries by region in 2025, thousand tonnes"
+  },
+  "source": "Source: Larkmoor Growers’ Cooperative depot records.",
+  "labels": {
+    "values": true,
+    "format": ",.1f"
+  }
+}
