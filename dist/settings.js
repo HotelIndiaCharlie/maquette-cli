@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 export const providerNames = ["anthropic", "openai-compatible"];
 export const efforts = ["default", "low", "medium", "high", "xhigh", "max"];
+export const permissionModes = ["ask", "auto", "plan"];
 // Every setting, by its dotted key.
 export const schema = {
     provider: { kind: "string", default: "anthropic", choices: providerNames, env: "MAQUETTE_PROVIDER", about: "Which model provider to use" },
@@ -24,6 +25,7 @@ export const schema = {
     "providers.openai-compatible.apiKeyEnv": { kind: "string", default: "OPENAI_API_KEY", about: "The environment variable holding the API key, if the server needs one" },
     "providers.openai-compatible.vision": { kind: "boolean", default: true, about: "Whether the model accepts images; when false, images are left out with a note" },
     "providers.openai-compatible.maxTokens": { kind: "number", min: 1, about: "The longest reply, in tokens; unset leaves it to the server" },
+    "permissions.mode": { kind: "string", default: "ask", choices: permissionModes, env: "MAQUETTE_PERMISSIONS", about: "What the model may do unasked at the prompt: ask (reads run, changes ask y/n/always), auto (everything runs), plan (reading only)" },
 };
 export class SettingsError extends Error {
 }

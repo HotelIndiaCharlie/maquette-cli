@@ -1,6 +1,6 @@
 # Maquette
 
-One [DesignCraft](https://github.com/storytold/designcraft) for every session. Type `maquette` in a folder, as you'd type `claude`. It starts DesignCraft headless, gives you a prompt to work on a document, and lets other terminals, scripts and Claude Code sessions send tool calls to the same open document.
+One [DesignCraft](https://github.com/storytold/designcraft) for every session. Type `maquette` in a folder, as you'd type `claude`. It starts DesignCraft headless and gives you a prompt where you say what you want done: the model calls DesignCraft's and Maquette's tools itself, and shows each call as it goes. Tool calls typed directly still run as before, and other terminals, scripts and Claude Code sessions can send calls to the same open document.
 
 ```
   ███╗   ███╗ █████╗  ██████╗ ██╗   ██╗███████╗████████╗████████╗███████╗
@@ -16,11 +16,20 @@ One [DesignCraft](https://github.com/storytold/designcraft) for every session. T
   ✓ Working in ~/projects/annual-report: DesignCraft reads and writes only here
   ✓ Listening on http://127.0.0.1:8787 for other sessions
   ✓ Renders go to maquette-renders/20261027-160346/
+  ✓ Model claude-opus-5-5 from anthropic, effort high, permission mode ask
 
-maquette › open_document example/annual-report.designcraft
-maquette › chart_create firstlight:slot:01 @example/specs/01-revenue.json
-maquette › render_page --page 0
-maquette › open
+❯ open the example report and put the revenue chart in the first slot, then show me page one
+
+  I'll open the report, draw the chart and render the page.
+  ✓ open_document --path example/annual-report.designcraft · 0.4 s
+  ✓ chart_create --frame firstlight:slot:01 --spec {"data":{"url":… · 2.1 s · maquette-renders/20261027-160346/002-chart_create.png
+  ✓ render_page --page 0 · 0.6 s · maquette-renders/20261027-160346/003-render_page.png
+
+  Done. The revenue chart sits in the first slot; page one is at maquette-renders/20261027-160346/003-render_page.png.
+─────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────
+ ? for shortcuts                                claude-opus-5-5 · high · ask · 14.2k in / 310 out · $0.06
 ```
 
 **Why:** each Claude Code session that lists DesignCraft as an MCP server starts its own engine with its own document, so two sessions can't work on the same page. Maquette runs one engine and shares it.
@@ -54,41 +63,56 @@ mkdir annual-report && cd annual-report
 maquette
 ```
 
-At the prompt:
+Set `ANTHROPIC_API_KEY` (or pick another model, see [Models](#models)). At the prompt:
 
 ```
-maquette › example
-maquette › open_document example/annual-report.designcraft
-maquette › save_document --path report.designcraft
-maquette › chart_create firstlight:slot:01 @example/specs/01-revenue.json
-maquette › open
-maquette › save_document
-maquette › exit
+❯ example
+❯ open the example report, save a copy as report.designcraft, and put the revenue chart from example/specs/01-revenue.json in the first slot
+❯ make the chart's title shorter, then show me page one
+❯ open
+❯ save it
+❯ exit
 ```
 
 1. `example` copies a five-page example report into `./example/`, with its data and five chart specs.
-2. `open_document` and `save_document` make your own copy of the report.
-3. `chart_create` draws a chart into the report's first chart slot.
-4. `open` shows the last render in Preview.
-5. The second `save_document` saves the copy again.
+2. The sentences go to the model. It opens and saves the document and draws the chart, asking you before each change (`y`, `n`, or `a` for always). Each call gets one line, with its render's path.
+3. `open` shows the last render in Preview.
+
+The same job as tool calls, with no model in the way:
+
+```
+❯ open_document example/annual-report.designcraft
+❯ save_document --path report.designcraft
+❯ chart_create firstlight:slot:01 @example/specs/01-revenue.json
+❯ render_page --page 0
+```
 
 DesignCraft reads and writes only inside the folder where you started Maquette. All paths are relative to it.
 
 ## The prompt
 
-Type a tool's name and its arguments. Each call gets a log line (time, call number, tool, the start of its arguments, `ok` or the error, how long it took, any image it saved), then its result.
+What you type decides what happens:
 
 | Type | Does |
 | --- | --- |
-| `<tool> …` | Calls a tool, with its arguments as flags (below) |
-| `tools` | Every tool, one line each |
-| `help`, `help <tool>` | How to type calls; one tool's description and flags. `help chart_create` gives the whole chart spec format. |
+| A sentence | Goes to the model, which calls tools until the job is done. Each call gets a line: `✓` or `✗`, the tool, its arguments, how long it took, any render's path. |
+| `<tool> …` | Calls a tool yourself, with its arguments as flags (below), with no model in the way. The model is told what you ran. |
+| `!<command>` | Runs a shell command in Maquette's folder. Its output shows and stays in the conversation, so you can ask about it. |
+| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools` |
+| `tools`, `help`, `help <tool>` | The tools one line each; how to type calls; one tool's description and flags. `help chart_create` gives the whole chart spec format. |
 | `example` | Copies the example report into `./example/` |
 | `open` | Opens the last image in Preview |
 | `exit` | Stops Maquette and DesignCraft, as do Ctrl-D and Ctrl-C on an empty line |
 
-- **Keys:** Tab completes tool names and flags, ↑ brings back earlier lines, and Ctrl-C clears what you've typed.
-- **Other sessions:** their calls appear above the prompt, marked `http`, without disturbing what you're typing.
+**Permissions.** In `ask` mode, the default, the model's reads and renders run on their own; opening another document, changing it, saving, and anything else that writes asks first: `y` runs it, `n` refuses it and tells the model, `a` allows that tool for the rest of the session. `auto` runs everything. `plan` lets the model only read and render, and it ends with a plan. `/permissions <mode>` switches and saves the choice in this folder's `.maquette/settings.json`; `maquette config set permissions.mode auto` does the same from outside. Tool calls and `!` commands you type yourself never ask.
+
+**Keys:** Tab completes tool names, flags, `/` commands and file paths; ↑ and ↓ bring back earlier lines; shift+enter, or a `\` at the end of the line, adds a line; Ctrl-C stops the model's turn, or clears the line, or on an empty line exits; `ctrl+o` expands the last tool line to its full arguments and result; `esc` dismisses a notice; `?` on an empty line lists the shortcuts.
+
+- **The screen** is drawn with [Ink](https://github.com/vadimdemedes/ink), like Claude Code's: finished output scrolls up above, the answer streams in with its Markdown, and the input box and the footer (model, effort, permission mode, tokens and, for Claude, dollars) stay at the bottom. When Maquette has no terminal, as under a script or `maquette < /dev/null`, it runs the server alone and prints one plain log line per call, as before.
+- **Other sessions:** their calls appear in the transcript marked `http`, in the order they ran between the model's own.
+- **Renders go back to the model** as images, so a model that can see looks at its own work.
+- **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions, like `CLAUDE.md`.
+- **Local models that can't call tools** fall back to a text protocol: the model writes `maquette call …` lines, Maquette asks before running each and sends back the results. The footer then says `text calls`.
 - **Save before you stop:** the document lives only in DesignCraft until `save_document`.
 - **One at a time:** a second `maquette` on the same port says which folder the first one is working in, and exits. Pick another port with `--port`.
 
@@ -155,7 +179,7 @@ Put in only what you want to change. A key you leave out keeps its default, and 
 
 ## Models
 
-`maquette ask` puts one question to a model and streams the answer. It works with or without a running `maquette`. When one is running, the model is told its folder, its instructions and its tools, so it can answer with the `maquette call` lines that would do the job. It can't call tools itself yet, and the `maquette ›` prompt still takes tool calls only. Chat at the prompt, with the model calling tools, is the next step in the [roadmap](ROADMAP.md).
+The model behind the prompt is a setting: `provider` and `model`, or `/model` and `/provider` at the prompt for this session. `maquette ask` puts one question to a model from outside the prompt and streams the answer, for scripts and quick questions. It works with or without a running `maquette`; when one is running, the model is told its folder, its instructions and its tools, so it can answer with the `maquette call` lines that would do the job, though it can't call them itself from there.
 
 ```bash
 maquette ask "how do I put a line chart in the second slot?"
@@ -178,7 +202,7 @@ maquette config set model qwen3:14b
 maquette ask "what can you do here?"
 ```
 
-The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. Maquette will need models that can call tools; one that can't says so when asked.
+The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. A model that can't call tools still works at the prompt, through the `maquette call` text protocol described under [The prompt](#the-prompt), just less smoothly.
 
 ## How it behaves
 
@@ -240,7 +264,11 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 
 | Path | What it is |
 | --- | --- |
-| [`src/cli.ts`](src/cli.ts) | `maquette`: the start screen, the prompt, the HTTP server and the `call`, `tools`, `example` and `install-designcraft` commands |
+| [`src/cli.ts`](src/cli.ts) | `maquette` and its commands: `call`, `tools`, `example`, `config`, `ask`, `models`, `install-designcraft` |
+| [`src/server.ts`](src/server.ts) | The running Maquette: the engine as a child process, the queue that runs calls one at a time, the HTTP server |
+| [`src/agent/`](src/agent/) | The agent loop ([`session.ts`](src/agent/session.ts)), routing of typed lines, permissions, the system prompt, `!` commands and costs. It emits events and knows nothing about the screen. |
+| [`src/ui/`](src/ui/) | The Ink screen: transcript, streaming answer with Markdown, tool lines, permission prompt, input box, footer |
+| [`src/args.ts`](src/args.ts) | How a typed line becomes a tool's arguments, shared by the prompt, `maquette call` and the text protocol |
 | [`src/engine.ts`](src/engine.ts) | The engine, an MCP server on stdio: DesignCraft's tools passed through, plus each tool module's |
 | [`src/designcraft.ts`](src/designcraft.ts) | Runs the DesignCraft CLI as an MCP server and calls its tools |
 | [`src/install.ts`](src/install.ts) | Finds the DesignCraft CLI, or downloads, checks and unpacks the pinned one |
@@ -257,20 +285,22 @@ git clone https://github.com/HotelIndiaCharlie/maquette-cli.git && cd maquette-c
 npm install
 npm run dev          # runs src/cli.ts directly (Node 24 runs TypeScript as is); add -- call … and the rest
 npm test             # draws the five example charts through the engine and checks them
-npm run test:unit    # settings, providers and commands, against local mock servers: no DesignCraft, key or network
-npm run test:all     # both of the above
+npm run test:unit    # settings, providers, the agent loop, the screen and the server, against mock servers, a stub engine and a fake model: no DesignCraft, key or network
+npm run smoke        # one scripted conversation end to end through the screen, with the stub engine and the fake model
+npm run test:all     # all of the above
 npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
 
-`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`).
+`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 
 ## Not built yet
 
-[`ROADMAP.md`](ROADMAP.md) lays out the plan for turning the prompt into an AI terminal: plain-sentence chat with an agent loop, any model (Anthropic or a local OpenAI-compatible endpoint) chosen in settings, MCP servers, skills and shell commands, all at the one `maquette ›` prompt.
+[`ROADMAP.md`](ROADMAP.md) lays out the rest of the plan: built-in shell and file tools for the model, other MCP servers, skills, saved sessions and `/compact`, hooks and a JSON mode.
 
-- **Chat in plain sentences.** `maquette ask` answers one question but can't call tools, and the prompt takes tool calls only. Phase 2 of the [roadmap](ROADMAP.md) adds the agent loop.
+- **Tools of its own.** The model can only call DesignCraft's and Maquette's tools; it can't run shell commands or read files itself yet (Phase 3). You can, with `!`.
+- **Saved conversations.** A conversation lasts as long as `maquette` runs (Phase 6).
 - **Keeping hand changes** to a chart across `chart_update`. They're detected and reported.
 - **More charts:** stacked or grouped bars, more than two series, and areas.
 - **Live mode.** DesignCraft runs headless, so the tools that need the app window (`screenshot`, `click`, `menu_list` and the like) return an error.
-- **Change notices.** Callers aren't told when another caller changes the document; they see it on their next call.
+- **Change notices.** Callers aren't told when another caller changes the document; they see it on their next call. The model is told other sessions share the document and to inspect before changing.

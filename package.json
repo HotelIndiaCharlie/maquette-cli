@@ -18,7 +18,8 @@
     "dev": "node src/cli.ts",
     "test": "node test/charts.ts",
     "test:unit": "node --test test/unit/*.test.ts",
-    "test:all": "npm run test:unit && npm test"
+    "test:all": "npm run test:unit && npm run smoke && npm test",
+    "smoke": "node test/smoke.ts"
   },
   "engines": {
     "node": ">=24"
@@ -33,7 +34,10 @@
     "d3-format": "3.1.2",
     "d3-scale": "4.0.2",
     "d3-time": "3.1.0",
-    "d3-time-format": "4.1.0"
+    "d3-time-format": "4.1.0",
+    "ink": "8.0.0",
+    "marked": "18.1.2",
+    "react": "19.3.1"
   },
   "devDependencies": {
     "@types/d3-format": "3.0.4",
@@ -41,6 +45,8 @@
     "@types/d3-time": "3.0.4",
     "@types/d3-time-format": "4.0.3",
     "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "ink-testing-library": "4.0.0",
     "typescript": "5.9.3"
   }
 }
