@@ -35,6 +35,8 @@ You need macOS and Node 24 or later.
 npm install -g https://github.com/HotelIndiaCharlie/maquette-cli/tarball/main
 ```
 
+It installs two names for the same command: `maquette`, and `mqt` for short. Everything in this README works with either, such as `mqt ask "…"` or `mqt config`.
+
 The shorter `npm install -g github:HotelIndiaCharlie/maquette-cli` hits a bug in global installs from git in npm 10 and 11. It leaves `maquette` pointing at a temporary folder that npm has already deleted, so use the tarball URL above.
 
 The first time you run `maquette`, it checks for the **DesignCraft CLI**, DesignCraft's headless engine. If it isn't there, Maquette says so and offers to install it. It downloads only the CLI (101 MB) from DesignCraft's GitHub release, never the desktop app. It checks the download against the SHA-256 pinned in [`designcraft-pin.json`](designcraft-pin.json) and keeps the CLI in `~/.maquette/designcraft/<version>/`. You can also install it ahead of time:
@@ -122,6 +124,62 @@ Paste this into the session while `maquette` is running:
 > 4. `maquette call save_document`
 > 5. `maquette call render_page --page 0`, then Read the image path it prints
 
+## Settings
+
+Maquette reads its settings from four places, each overriding the one before key by key:
+
+1. `~/.maquette/settings.json`, yours, for every project
+2. `.maquette/settings.json` in the folder Maquette runs in, for this project
+3. environment variables, such as `MAQUETTE_MODEL` and `MAQUETTE_PORT`
+4. flags, such as `--port` and `--model`
+
+| Command | Does |
+| --- | --- |
+| `maquette config` | Every setting, its value, and where the value comes from |
+| `maquette config keys` | What each setting does, its choices, default and environment variable |
+| `maquette config set <key> <value>` | Writes one setting to your file; `--project` writes this folder's instead |
+| `maquette config unset <key>` | Removes it again; `--project` as above |
+| `maquette config edit` | Opens your settings file in `$VISUAL` or `$EDITOR`, or else the system's text editor, creating it as `{}` if there's none yet. With an editor in the terminal, it checks the file once you close it. `--project` opens this folder's. |
+| `maquette config get <key>` | Prints one value |
+
+Keys are dotted: `maquette config set providers.anthropic.effort medium`. In the file they nest:
+
+```json
+{
+  "model": "claude-sonnet-5-5",
+  "providers": { "anthropic": { "effort": "medium" } }
+}
+```
+
+Put in only what you want to change. A key you leave out keeps its default, and gets a better one if a later version of Maquette changes it. For reference, `maquette config edit` writes every key with its default to `~/.maquette/settings.defaults.json`. Maquette rewrites that file and never reads it, so changes there have no effect. API keys never go in these files. Each provider names the environment variable that holds its key (`providers.anthropic.apiKeyEnv`, `providers.openai-compatible.apiKeyEnv`), and `maquette config` says whether it's set. A value of the wrong type stops every command but `maquette config`, which shows the problem and can fix it.
+
+## Models
+
+`maquette ask` puts one question to a model and streams the answer. It works with or without a running `maquette`. When one is running, the model is told its folder, its instructions and its tools, so it can answer with the `maquette call` lines that would do the job. It can't call tools itself yet, and the `maquette ›` prompt still takes tool calls only. Chat at the prompt, with the model calling tools, is the next step in the [roadmap](ROADMAP.md).
+
+```bash
+maquette ask "how do I put a line chart in the second slot?"
+maquette ask --image maquette-renders/20261027-160346/003-render_page.png "what's wrong with this page?"
+git diff | maquette ask -
+maquette models                  # what the provider offers, with the one in use marked
+```
+
+`--model <id>` and `--provider <name>` override the settings for one command.
+
+**Claude** is the default: provider `anthropic`, model `claude-opus-5-5`. Set `ANTHROPIC_API_KEY`, or sign in with `ant auth login`. Maquette asks for adaptive thinking at the effort in `providers.anthropic.effort` (default `high`), caches the instructions and history between turns, and lets the API summarise early history when a conversation gets long. It also turns on the API's refusal fallback: if the model declines on policy grounds, the API retries on its default fallback model and Maquette says so. `maquette config set providers.anthropic.refusalFallback false` turns that off. Models older than Claude 4.6 get none of thinking, effort or summarising, since they don't support them.
+
+**Any other model**, including one on your own machine, goes through provider `openai-compatible`: any server with an OpenAI-style `/v1/chat/completions`, such as Ollama, LM Studio, llama.cpp's server, vLLM or OpenRouter. With Ollama:
+
+```bash
+ollama pull qwen3:14b
+maquette config set provider openai-compatible
+maquette models
+maquette config set model qwen3:14b
+maquette ask "what can you do here?"
+```
+
+The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. Maquette will need models that can call tools; one that can't says so when asked.
+
 ## How it behaves
 
 - **One document for everyone.** Calls from the prompt and from other sessions run one at a time, in the order they arrive. Every caller sees the effect of every other call. `open_document` opens a further document and makes it the active one for everyone.
@@ -186,6 +244,8 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | [`src/engine.ts`](src/engine.ts) | The engine, an MCP server on stdio: DesignCraft's tools passed through, plus each tool module's |
 | [`src/designcraft.ts`](src/designcraft.ts) | Runs the DesignCraft CLI as an MCP server and calls its tools |
 | [`src/install.ts`](src/install.ts) | Finds the DesignCraft CLI, or downloads, checks and unpacks the pinned one |
+| [`src/settings.ts`](src/settings.ts) | The settings: their keys, types and defaults, the four layers, and writing one key |
+| [`src/providers/`](src/providers/) | Model providers behind one interface ([`types.ts`](src/providers/types.ts)): [`anthropic.ts`](src/providers/anthropic.ts), [`openai-compatible.ts`](src/providers/openai-compatible.ts), and [`fake.ts`](src/providers/fake.ts) for tests |
 | [`src/tools/`](src/tools/) | Tool modules; [`chart/`](src/tools/chart/) is the first |
 | [`examples/`](examples/) | The example report (an A4 annual report for a fictional cooperative, with five labelled chart slots), its CSVs and their `-updated` versions, and five chart specs |
 | [`designcraft-pin.json`](designcraft-pin.json) | The DesignCraft version Maquette is tested with, and its CLI's download and checksum |
@@ -197,6 +257,8 @@ git clone https://github.com/HotelIndiaCharlie/maquette-cli.git && cd maquette-c
 npm install
 npm run dev          # runs src/cli.ts directly (Node 24 runs TypeScript as is); add -- call … and the rest
 npm test             # draws the five example charts through the engine and checks them
+npm run test:unit    # settings, providers and commands, against local mock servers: no DesignCraft, key or network
+npm run test:all     # both of the above
 npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
@@ -205,7 +267,9 @@ npm run build        # compiles src/ to dist/
 
 ## Not built yet
 
-- **Chat in plain sentences.** The prompt takes tool calls; it doesn't pass sentences to a model.
+[`ROADMAP.md`](ROADMAP.md) lays out the plan for turning the prompt into an AI terminal: plain-sentence chat with an agent loop, any model (Anthropic or a local OpenAI-compatible endpoint) chosen in settings, MCP servers, skills and shell commands, all at the one `maquette ›` prompt.
+
+- **Chat in plain sentences.** `maquette ask` answers one question but can't call tools, and the prompt takes tool calls only. Phase 2 of the [roadmap](ROADMAP.md) adds the agent loop.
 - **Keeping hand changes** to a chart across `chart_update`. They're detected and reported.
 - **More charts:** stacked or grouped bars, more than two series, and areas.
 - **Live mode.** DesignCraft runs headless, so the tools that need the app window (`screenshot`, `click`, `menu_list` and the like) return an error.
