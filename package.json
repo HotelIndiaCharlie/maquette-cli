@@ -12,7 +12,6 @@
     "designcraft-pin.json"
   ],
   "scripts": {
-    "prepare": "tsc",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "dev": "node --experimental-strip-types --no-warnings src/cli.ts",

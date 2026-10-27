@@ -192,13 +192,14 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 
 ```bash
 git clone https://github.com/HotelIndiaCharlie/maquette-cli.git && cd maquette-cli
-npm install          # also builds dist/
+npm install
 npm run dev          # runs src/cli.ts directly (Node's type stripping); add -- call … and the rest
 npm test             # draws the five example charts through the engine and checks them
 npm run typecheck
+npm run build        # compiles src/ to dist/
 ```
 
-`npm test` needs the DesignCraft CLI (`maquette install-designcraft`).
+`dist/` is committed, so that `npm install -g github:…` needs no build step: npm doesn't install a package's dev dependencies when it installs one globally from git. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`).
 
 ## Not built yet
 
