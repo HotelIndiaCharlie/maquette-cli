@@ -15,5 +15,6 @@ const title = [
 export function bannerText(columns = process.stdout.columns || 80) {
     const rows = columns < title[0].length + 2 ? ["M A Q U E T T E"] : title;
     const swatches = [51, 201, 226, 244].map((n) => paint(`38;5;${n}`, "■")).join(" ");
-    return `\n${rows.map((r) => `  ${shade(r)}`).join("\n")}\n\n  ${swatches}  ${paint(1, "one DesignCraft for every session")}\n`;
+    // Two blank lines above the title, one below it, one after the swatches.
+    return `\n\n${rows.map((r) => `  ${shade(r)}`).join("\n")}\n\n  ${swatches}  ${paint(1, "one DesignCraft for every session")}\n`;
 }

@@ -34,7 +34,8 @@ export function ToolLine({ item, root, frame }) {
 export function renderItem(item, root) {
     switch (item.kind) {
         case "banner":
-            return h(Box, { flexDirection: "column", marginBottom: 1 }, ...item.lines.map((l, i) => h(Text, { key: i }, l)));
+            // An empty Text draws nothing, so a blank line is drawn as a space.
+            return h(Box, { flexDirection: "column", marginBottom: 1 }, ...item.lines.map((l, i) => h(Text, { key: i }, l || " ")));
         case "user":
             return h(Box, { marginTop: 1 }, h(Text, { color: "magenta", bold: true }, "❯ "), h(Text, {}, item.text));
         case "answer":
