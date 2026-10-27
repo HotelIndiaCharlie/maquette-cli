@@ -32,8 +32,10 @@ maquette › open
 You need macOS and Node 22.6 or later.
 
 ```bash
-npm install -g github:HotelIndiaCharlie/maquette-cli
+npm install -g https://github.com/HotelIndiaCharlie/maquette-cli/tarball/main
 ```
+
+The shorter `npm install -g github:HotelIndiaCharlie/maquette-cli` hits a bug in npm 10's global installs from git. It leaves `maquette` pointing at a temporary folder that npm has already deleted, so use the tarball URL above.
 
 The first time you run `maquette`, it checks for the **DesignCraft CLI**, DesignCraft's headless engine. If it isn't there, Maquette says so and offers to install it. It downloads only the CLI (101 MB) from DesignCraft's GitHub release, never the desktop app. It checks the download against the SHA-256 pinned in [`designcraft-pin.json`](designcraft-pin.json) and keeps the CLI in `~/.maquette/designcraft/<version>/`. You can also install it ahead of time:
 
@@ -199,7 +201,7 @@ npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
 
-`dist/` is committed, so that `npm install -g github:…` needs no build step: npm doesn't install a package's dev dependencies when it installs one globally from git. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`).
+`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`).
 
 ## Not built yet
 
