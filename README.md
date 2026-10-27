@@ -205,6 +205,8 @@ npm run build        # compiles src/ to dist/
 
 ## Not built yet
 
+[`ROADMAP.md`](ROADMAP.md) lays out the plan for turning the prompt into an AI terminal: plain-sentence chat with an agent loop, any model (Anthropic or a local OpenAI-compatible endpoint) chosen in settings, MCP servers, skills and shell commands, all at the one `maquette ›` prompt.
+
 - **Chat in plain sentences.** The prompt takes tool calls; it doesn't pass sentences to a model.
 - **Keeping hand changes** to a chart across `chart_update`. They're detected and reported.
 - **More charts:** stacked or grouped bars, more than two series, and areas.
