@@ -15,9 +15,11 @@ The goal of this roadmap is one terminal: you type `maquette`, you talk to it in
 
 Each phase is shippable on its own. Later phases don't block earlier ones from being useful.
 
-### Phase 0: Settings
+### Phase 0: Settings (done)
 
 The foundation everything else reads from.
+
+**As built:** `src/settings.ts` and `maquette config` (list, `keys`, `get`, `set`, `unset`, with `--project` for the folder's file). Keys that belong to later phases (`permissions`, `mcpServers`) arrive with those phases rather than sitting unused. API keys are only ever read from environment variables named in the settings. The environment variables are `MAQUETTE_PROVIDER`, `MAQUETTE_MODEL`, `MAQUETTE_PORT`, `DESIGNCRAFT_CLI`, `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`. `--model` and `--provider` are read only by `ask` and `models`, so `maquette call` still passes flags of those names to tools.
 
 - `~/.maquette/settings.json` (user) and `./.maquette/settings.json` (project), project wins per key. Environment variables override both (`MAQUETTE_MODEL`, `MAQUETTE_PROVIDER`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, …).
 - `maquette config` prints the merged settings and where each value came from. `maquette config set model claude-opus-5-5` writes one key.
@@ -41,7 +43,9 @@ The foundation everything else reads from.
 
 **Done when:** `maquette config` works and the existing prompt still behaves exactly as before.
 
-### Phase 1: Model providers
+### Phase 1: Model providers (done)
+
+**As built:** `src/providers/` with the Anthropic (SDK 1.x), OpenAI-compatible and fake providers, plus `maquette ask` and `maquette models`. The Anthropic provider adds the API's refusal fallback, and leaves thinking, effort and compaction off for models older than Claude 4.6. `/model` and `/provider` move to Phase 2, since the prompt doesn't chat until then. `ask` gives the model Maquette's tool list in its instructions but no tools to call. Tests run against local mock servers of both APIs, so they need no key; nothing has been run against the live Claude API or a real Ollama yet.
 
 - `src/providers/types.ts`: a `Provider` with one method, `chat(request) → async iterable of events`. The request carries the system prompt, the message history, the tool definitions (JSON Schema, which Maquette already has from MCP) and images. Events are `text`, `tool_call`, `usage` and `done`. Streaming is the only mode, so the prompt can print as the model writes.
 - `src/providers/anthropic.ts`: the official `@anthropic-ai/sdk`. Default model `claude-opus-5-5`, adaptive thinking, `output_config.effort` from settings, prompt caching on the system prompt and tool list, tool results and images sent as proper content blocks, server-side compaction when the history gets long. Typed error classes mapped to one-line messages at the prompt (no key, rate limited, model not found).

@@ -3,6 +3,7 @@
 // plus Maquette's tool modules) in the folder it's started in, takes tool calls over HTTP on
 // localhost from other sessions and, on a terminal, gives a prompt to type them too. Calls
 // run one at a time, all on the same open document. `call` and `tools` are its clients.
+// `config` shows and changes the settings, and `ask` and `models` talk to the model they name.
 import { execFile } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -13,6 +14,8 @@ import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import type { ToolResult } from "./designcraft.ts";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.ts";
+import { createProvider, defaultModels, type ImagePart, type TextPart } from "./providers/index.ts";
+import { type Loaded, load, parse, schema, SettingsError, write } from "./settings.ts";
 
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
@@ -22,13 +25,19 @@ const usage = `Usage:
   maquette tools [<tool>]                list the tools, or show one tool's flags
   maquette example                       copy the example report into ./example/
   maquette install-designcraft           install the DesignCraft CLI ${pin.version} (the headless engine, not the app)
+  maquette ask "<message>"               ask the model one question; - or a pipe reads it from stdin
+  maquette models                        list the models the provider offers
+  maquette config                        show the settings and where each comes from
+  maquette config set <key> <value>      change one (unset <key> removes it; keys describes them all)
 A tool's arguments are --flags (render_page --page 0); its required ones can go without the
 flag (open_document example/annual-report.designcraft). @file reads a value from a JSON file,
 and a single {…} or @file gives all the arguments. Paths are relative to the folder Maquette
 runs in, and DesignCraft reads and writes only inside it.
-Options: --port <n> (default 8787) for every command; --json for call and tools (the raw
-reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another DesignCraft CLI; --from <zip>
-to install the CLI from a downloaded copy of its release zip.`;
+Options: --port <n> (default 8787) for every command; --json for call, tools and models (the
+raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another DesignCraft CLI; --from <zip>
+to install the CLI from a downloaded copy of its release zip; --provider <name> and --model <id>
+for ask and models; --image <file> (repeatable) to show the model an image with ask; --project
+for config set and unset, to write .maquette/settings.json here instead of ~/.maquette.`;
 
 type Reply = { id: number; tool: string; ok: boolean; text: string; images: string[] };
 type Prop = { type?: string | string[]; description?: string };
@@ -41,22 +50,37 @@ function fail(message: string): never {
 
 // Maquette's own options work anywhere on the line; no tool has arguments by these names.
 const argv = process.argv.slice(2);
-function option(name: string, takesValue = false): string | undefined {
-  const i = argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+function option(name: string, takesValue = false, from = argv): string | undefined {
+  const i = from.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
   if (i < 0) return undefined;
-  const [a] = argv.splice(i, 1);
+  const [a] = from.splice(i, 1);
   if (a.includes("=")) return a.slice(a.indexOf("=") + 1);
-  return takesValue ? (argv.splice(i, 1)[0] ?? fail(`--${name} needs a value.`)) : "";
+  return takesValue ? (from.splice(i, 1)[0] ?? fail(`--${name} needs a value.`)) : "";
 }
-const portText = option("port", true) ?? "8787";
-const port = Number(portText);
-if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`--port ${portText} isn't a port number.`);
+const portFlag = option("port", true);
 const asJson = option("json") !== undefined;
-const designcraftPath = option("designcraft", true);
+const designcraftFlag = option("designcraft", true);
 const fromZip = option("from", true);
 const wantsHelp = option("help") !== undefined || argv.includes("-h");
 const wantsVersion = option("version") !== undefined || argv.includes("-v");
 const [command, ...rest] = argv;
+// Options that only some commands read, taken from their own arguments, so that a tool's
+// flags of the same name still reach it through `maquette call`.
+const talks = command === "ask" || command === "models";
+const modelFlag = talks ? option("model", true, rest) : undefined;
+const providerFlag = talks ? option("provider", true, rest) : undefined;
+const imageFlags: string[] = [];
+for (let image; command === "ask" && (image = option("image", true, rest)) !== undefined; ) imageFlags.push(image);
+const projectScope = command === "config" && option("project", false, rest) !== undefined;
+
+let loaded: Loaded;
+try {
+  loaded = load({ flags: { port: portFlag, designcraft: designcraftFlag, model: modelFlag, provider: providerFlag }, lenient: command === "config" });
+} catch (e) {
+  fail((e as Error).message);
+}
+const { settings } = loaded;
+const port = settings.port;
 
 const two = (n: number) => String(n).padStart(2, "0");
 const clock = (d = new Date()) => `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
@@ -64,6 +88,8 @@ const stamp = (d: Date) => `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.ge
 const gist = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const tilde = (p: string) => (p === homedir() || p.startsWith(`${homedir()}/`) ? `~${p.slice(homedir().length)}` : p);
 const mb = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
+// A path inside this folder relative to it, else from ~.
+const shortPath = (p: string) => (p.startsWith(`${process.cwd()}/`) ? relative(process.cwd(), p) : tilde(p));
 
 // The start screen: the name in block letters, shaded cyan to magenta to yellow like the
 // process inks, or in spaced capitals when the terminal is too narrow. Colour only on a terminal.
@@ -252,7 +278,7 @@ async function serve() {
   banner();
   let cli: string | undefined;
   try {
-    cli = findDesignCraft(designcraftPath);
+    cli = findDesignCraft(settings.designcraft);
   } catch (e) {
     fail(`  ${(e as Error).message}`);
   }
@@ -478,12 +504,150 @@ async function listTools(name: string | undefined) {
   console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
 }
 
+// `maquette config`: the settings, each with where its value comes from; `set`, `unset` and
+// `get` one key; `keys` describes every key.
+function config(args: string[]) {
+  const [action = "list", key, ...words] = args;
+  const scope = projectScope ? "project" : "user";
+  const file = loaded.files[scope];
+  const shown = (v: unknown) => (v === undefined ? "unset" : typeof v === "string" ? v : JSON.stringify(v));
+  const origin = (k: string) => {
+    const o = loaded.origins.get(k);
+    return !o ? "" : o.source === "env" ? `env ${o.path}` : o.source === "flag" ? `--${k}` : o.source === "default" ? "default" : `${o.source} ${shortPath(o.path!)}`;
+  };
+  const value = (k: string) => k.split(".").reduce<any>((v, part) => v?.[part], settings);
+  const known = (k: string | undefined) => (k && schema[k] ? k : fail(k ? `There's no setting "${k}". \`maquette config keys\` describes them.` : "Which setting? `maquette config keys` describes them."));
+  try {
+    if (action === "list") {
+      const keys = Object.keys(schema);
+      const width = Math.max(...keys.map((k) => k.length));
+      const values = keys.map((k) => shown(k === "model" ? (value(k) ?? defaultModels[settings.provider]) : value(k)));
+      const vwidth = Math.max(...values.map((v) => v.length));
+      console.log(`Settings come from ${shortPath(loaded.files.user)}, then ${shortPath(loaded.files.project)},\nthen environment variables and flags; each overrides the one before.\n`);
+      keys.forEach((k, i) => {
+        const note = k === "model" && value(k) === undefined ? (defaultModels[settings.provider] ? `${settings.provider}'s default` : "") : origin(k);
+        const v = values[i].padEnd(vwidth);
+        console.log(`  ${k.padEnd(width)}  ${values[i] === "unset" ? paint(2, v) : v}  ${paint(2, note)}`);
+      });
+      const p = settings.providers[settings.provider];
+      const keyEnv = p.apiKeyEnv;
+      const has = (name: string) => Boolean(process.env[name]);
+      const credentials =
+        has(keyEnv) ? `${keyEnv} is set`
+        : settings.provider === "anthropic" && has("ANTHROPIC_AUTH_TOKEN") ? "ANTHROPIC_AUTH_TOKEN is set"
+        : settings.provider === "anthropic" ? `${keyEnv} isn't set; the SDK will look for an \`ant auth login\` profile`
+        : `${keyEnv} isn't set, which is fine for a local server`;
+      console.log(`\n  Credentials for ${settings.provider}: ${credentials}.`);
+      console.log(`\n\`maquette config set <key> <value>\` writes ${tilde(loaded.files.user)}; add --project for this folder's.\n\`maquette config keys\` describes every key.`);
+    } else if (action === "keys") {
+      for (const [k, spec] of Object.entries(schema)) {
+        const extra = [spec.choices ? `one of ${spec.choices.join(", ")}` : spec.kind, spec.default !== undefined ? `default ${JSON.stringify(spec.default)}` : "", spec.env ? `env ${spec.env}` : ""].filter(Boolean).join("; ");
+        console.log(`${paint(1, k)}  ${paint(2, extra)}\n  ${spec.about}`);
+      }
+    } else if (action === "get") {
+      const v = value(known(key));
+      if (v !== undefined) console.log(typeof v === "string" ? v : JSON.stringify(v));
+    } else if (action === "set") {
+      if (!words.length) fail(`What value? maquette config set ${known(key)} <value>`);
+      const v = parse(known(key), words.join(" "), "maquette config set");
+      write(file, key!, v);
+      console.log(`Set ${key} to ${JSON.stringify(v)} in ${shortPath(file)}.`);
+      const now = load({ lenient: true }).origins.get(key!);
+      if (now && now.source !== scope) console.log(paint(33, `It doesn't take effect here: ${now.source === "env" ? `the environment variable ${now.path}` : `${shortPath(now.path!)}`} overrides it.`));
+      if (key === "provider" && v === "openai-compatible" && !settings.model) console.log(`Now pick a model: \`maquette models\` lists what the server offers, then \`maquette config set model <id>\`.`);
+    } else if (action === "unset") {
+      console.log(write(file, known(key), undefined) ? `Removed ${key} from ${shortPath(file)}.` : `${key} isn't set in ${shortPath(file)}.`);
+    } else fail(`maquette config takes list, keys, get <key>, set <key> <value> or unset <key>, not "${action}".`);
+  } catch (e) {
+    if (e instanceof SettingsError) fail(e.message);
+    throw e;
+  }
+}
+
+async function listModels() {
+  const provider = createProvider(settings);
+  let list;
+  try {
+    list = await provider.models();
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  if (asJson) return console.log(JSON.stringify(list, null, 2));
+  const where = settings.provider === "openai-compatible" ? ` at ${settings.providers["openai-compatible"].baseUrl}` : "";
+  console.log(`${list.length} models from ${provider.name}${where}:\n`);
+  for (const m of list) console.log(`${m.id === provider.model ? paint(32, "›") : " "} ${m.id}${m.name && m.name !== m.id ? paint(2, `  ${m.name}`) : ""}`);
+  console.log(`\n${provider.model ? `Using ${paint(1, provider.model)}. ` : "No model is set. "}Change it with \`maquette config set model <id>\`.`);
+}
+
+// What the model is told in `maquette ask`: where it is, and Maquette's tools when it's running.
+function askPrompt(running?: { root: string; instructions: string; tools: Tool[] }): string {
+  return [
+    "You answer inside Maquette, a terminal program. Maquette runs DesignCraft, a page-layout program, headless, with one shared document that the person and other terminals and sessions send tool calls to.",
+    "This is `maquette ask`: one question, one answer, and you can't call tools yourself here. When the question needs tools, give the `maquette call <tool> --flag value` lines that would do it, each on its own line, for the person to run. Required arguments can go without their flag, objects take JSON or @file, and `maquette tools <tool>` shows a tool's flags.",
+    "Write for a terminal: plain sentences and short lists, commands on their own lines, no headings or tables.",
+    running
+      ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}\n\nIts tools:\n${catalogue(running.tools)}`
+      : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
+  ].join("\n\n");
+}
+
+const mediaTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
+
+async function ask(tokens: string[]) {
+  let text = tokens.join(" ").trim();
+  if (text === "-" || (!text && !process.stdin.isTTY)) text = (await readAll(process.stdin)).trim();
+  if (!text) fail('What should Maquette ask? maquette ask "<message>", or pipe the message in.');
+  const parts: (TextPart | ImagePart)[] = imageFlags.map((p) => {
+    const path = resolve(p.replace(/^~(?=\/|$)/, homedir()));
+    const mediaType = mediaTypes[extname(path).toLowerCase()] ?? fail(`--image ${p}: Maquette can show the model PNG, JPEG, GIF or WebP images.`);
+    if (!existsSync(path)) fail(`--image ${p}: there's no such file.`);
+    return { type: "image", mediaType, data: readFileSync(path).toString("base64"), path };
+  });
+  parts.push({ type: "text", text });
+  const provider = createProvider(settings);
+  const reply = await fetch(`http://127.0.0.1:${port}/tools`).then((r) => r.json(), () => undefined);
+  const running = Array.isArray(reply?.tools) && typeof reply.root === "string" ? reply : undefined;
+  const controller = new AbortController();
+  process.on("SIGINT", () => controller.abort());
+  let last = "\n";
+  let done;
+  try {
+    for await (const event of provider.chat({ system: askPrompt(running), messages: [{ role: "user", parts }], signal: controller.signal })) {
+      if (event.type === "text") {
+        process.stdout.write(event.text);
+        last = event.text.at(-1) ?? last;
+      } else if (event.type === "notice") process.stderr.write(`${last === "\n" ? "" : "\n"}${paint(2, event.text)}\n`);
+      else if (event.type === "done") done = event;
+    }
+  } catch (e) {
+    if (last !== "\n") process.stdout.write("\n");
+    if (controller.signal.aborted) {
+      console.error(paint(2, "Stopped."));
+      process.exit(130);
+    }
+    fail((e as Error).message);
+  }
+  if (last !== "\n") process.stdout.write("\n");
+  if (!done) fail("The reply ended without finishing.");
+  const u = done.usage;
+  const cached = (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0);
+  if (u) console.error(paint(2, `${done.model} · ${u.input + cached} tokens in${u.cacheRead ? `, ${u.cacheRead} from cache` : ""} · ${u.output} out`));
+  if (done.stop === "refusal") {
+    console.error(paint(31, `The model declined to answer${done.detail ? `: ${done.detail}` : "."}`));
+    process.exitCode = 1;
+  } else if (done.stop === "max_tokens") console.error(paint(33, `The reply was cut off at the token limit (providers.${provider.name}.maxTokens).`));
+}
+
+for (const warning of loaded.warnings) console.error(paint(33, warning));
 if (wantsVersion) console.log(`maquette ${version} (DesignCraft CLI ${pin.version} pinned)`);
 else if (wantsHelp || command === "help") console.log(usage);
 else if (!command || command === "serve") await serve();
 else if (command === "call") await call(rest[0], rest.slice(1));
 else if (command === "tools") await listTools(rest[0]);
 else if (command === "example") console.log(copyExample(process.cwd()));
+else if (command === "config") config(rest);
+else if (command === "models") await listModels();
+else if (command === "ask") await ask(rest);
 else if (command === "install-designcraft") {
   if (existsSync(pinned) && !fromZip) console.log(`DesignCraft CLI ${pin.version} is already installed in ${tilde(home)}.`);
   else await install(fromZip);
