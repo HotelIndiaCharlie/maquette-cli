@@ -187,6 +187,8 @@ async function serve() {
   const { runApp } = await import("./ui/app.ts");
   const session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample });
   process.on("SIGTERM", () => void stop());
+  // Clear the screen first, so the title starts at the top; what was there stays in the scrollback.
+  process.stdout.write("\x1b[2J\x1b[H");
   await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint });
   await stop();
 }
