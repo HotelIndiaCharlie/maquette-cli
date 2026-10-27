@@ -57,7 +57,8 @@ try {
   screen.stdin.write("a");
   await until(/Done\. The revenue chart/, "the final answer");
   await tick(100);
-  console.log(strip(screen.lastFrame()));
+  // The screen as it was drawn, colours and all.
+  console.log(screen.lastFrame());
   expect(/✓ open_document --path example\/annual-report\.designcraft/, "the open_document line");
   expect(/✓ chart_create --frame firstlight:slot:01 --spec \{[^]*?· \d+ ms ·\s+\S*002-chart_create\.png/, "the chart_create line with its render");
   expect(/✓ render_page --page 0 · \d+ ms · \S*003-render_page\.png/, "the render_page line");

@@ -2,7 +2,7 @@
 // log lines, and never loads Ink.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -39,7 +39,8 @@ test("without a terminal, maquette serves calls, prints plain log lines and does
   assert.match(m.out(), /8 tools\)/, m.err());
   assert.match(m.out(), /From another terminal/);
   const tools = await (await fetch(`http://127.0.0.1:${m.port}/tools`)).json();
-  assert.equal(tools.root, m.cwd);
+  // macOS reports the temp folder through its /private symlink.
+  assert.equal(realpathSync(tools.root), realpathSync(m.cwd));
   assert.ok(tools.tools.some((t: { name: string }) => t.name === "render_page"));
   const r = await (await fetch(`http://127.0.0.1:${m.port}/call`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tool: "render_page", arguments: { page: 1 } }) })).json();
   assert.equal(r.ok, true);
