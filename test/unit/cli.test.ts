@@ -2,7 +2,7 @@
 // plays both a running Maquette (GET /tools, POST /call) and an OpenAI-compatible model server.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -114,4 +114,39 @@ test("call still passes --model and --provider through to the tool", async () =>
   const r = await run(["call", "set_meta", "--model", "A4", "--provider", "press"], { MAQUETTE_PORT: server.url.split(":").at(-1)! });
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(server.seen.at(-1)!.body, { tool: "set_meta", arguments: { model: "A4", provider: "press" } });
+});
+
+test("config edit creates the file, writes the defaults beside it, opens the editor and checks the result", async () => {
+  const base = mkdtempSync(join(tmpdir(), "maquette-cli-"));
+  const home = join(base, "home");
+  const cwd = join(base, "project");
+  mkdirSync(home);
+  mkdirSync(cwd);
+  // An "editor" that keeps a copy of what it was given, then writes new settings.
+  const editor = join(base, "editor.sh");
+  writeFileSync(editor, '#!/bin/sh\ncp "$1" "$1.before"\nprintf "%s" "$NEW_SETTINGS" > "$1"\n');
+  chmodSync(editor, 0o755);
+  const edit = (settings: string, ...args: string[]) => runIn(cwd, home, ["config", "edit", ...args], { EDITOR: editor, NEW_SETTINGS: settings });
+
+  const first = await edit('{"model": "claude-sonnet-5-5"}');
+  const user = join(home, ".maquette", "settings.json");
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /Created ~\/.maquette\/settings.json, empty, and opening it\./);
+  assert.equal(readFileSync(`${user}.before`, "utf8"), "{}\n");
+  assert.match(first.stdout, /✓ ~\/.maquette\/settings.json is valid\./);
+  const reference = JSON.parse(readFileSync(join(home, ".maquette", "settings.defaults.json"), "utf8"));
+  assert.equal(reference.model, "claude-opus-5-5");
+  assert.equal(reference.providers.anthropic.effort, "high");
+  assert.equal(reference.designcraft, undefined);
+  assert.match((await runIn(cwd, home, ["config", "get", "model"], {})).stdout, /claude-sonnet-5-5/);
+
+  const project = await edit('{"port": "eighty", "colour": "blue"}', "--project");
+  assert.match(project.stdout, /Created .maquette\/settings.json/);
+  assert.match(project.stdout, /port must be a whole number|port must be a number/);
+  assert.match(project.stdout, /"colour"; it's ignored/);
+  assert.ok(existsSync(join(cwd, ".maquette", "settings.json")));
+
+  const again = await edit('{"model": "claude-haiku-5-5"}');
+  assert.match(again.stdout, /^Opening ~\/.maquette\/settings.json\./);
+  assert.equal(readFileSync(`${user}.before`, "utf8"), '{"model": "claude-sonnet-5-5"}');
 });

@@ -137,9 +137,19 @@ Maquette reads its settings from four places, each overriding the one before key
 | `maquette config keys` | What each setting does, its choices, default and environment variable |
 | `maquette config set <key> <value>` | Writes one setting to your file; `--project` writes this folder's instead |
 | `maquette config unset <key>` | Removes it again; `--project` as above |
+| `maquette config edit` | Opens your settings file in `$VISUAL` or `$EDITOR`, or else the system's text editor, creating it as `{}` if there's none yet. With an editor in the terminal, it checks the file once you close it. `--project` opens this folder's. |
 | `maquette config get <key>` | Prints one value |
 
-Keys are dotted: `maquette config set providers.anthropic.effort medium`. API keys never go in these files. Each provider names the environment variable that holds its key (`providers.anthropic.apiKeyEnv`, `providers.openai-compatible.apiKeyEnv`), and `maquette config` says whether it's set. A value of the wrong type stops every command but `maquette config`, which shows the problem and can fix it.
+Keys are dotted: `maquette config set providers.anthropic.effort medium`. In the file they nest:
+
+```json
+{
+  "model": "claude-sonnet-5-5",
+  "providers": { "anthropic": { "effort": "medium" } }
+}
+```
+
+Put in only what you want to change. A key you leave out keeps its default, and gets a better one if a later version of Maquette changes it. For reference, `maquette config edit` writes every key with its default to `~/.maquette/settings.defaults.json`. Maquette rewrites that file and never reads it, so changes there have no effect. API keys never go in these files. Each provider names the environment variable that holds its key (`providers.anthropic.apiKeyEnv`, `providers.openai-compatible.apiKeyEnv`), and `maquette config` says whether it's set. A value of the wrong type stops every command but `maquette config`, which shows the problem and can fix it.
 
 ## Models
 

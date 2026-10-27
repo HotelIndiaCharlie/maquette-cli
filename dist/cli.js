@@ -4,7 +4,7 @@
 // localhost from other sessions and, on a terminal, gives a prompt to type them too. Calls
 // run one at a time, all on the same open document. `call` and `tools` are its clients.
 // `config` shows and changes the settings, and `ask` and `models` talk to the model they name.
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
@@ -14,7 +14,7 @@ import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.js";
 import { createProvider, defaultModels } from "./providers/index.js";
-import { load, parse, schema, SettingsError, write } from "./settings.js";
+import { defaults, ensure, load, parse, schema, SettingsError, write } from "./settings.js";
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
 const usage = `Usage:
@@ -27,6 +27,7 @@ const usage = `Usage:
   maquette models                        list the models the provider offers
   maquette config                        show the settings and where each comes from
   maquette config set <key> <value>      change one (unset <key> removes it; keys describes them all)
+  maquette config edit                   open your settings file in an editor, creating it if needed
 A tool's arguments are --flags (render_page --page 0); its required ones can go without the
 flag (open_document example/annual-report.designcraft). @file reads a value from a JSON file,
 and a single {…} or @file gives all the arguments. Paths are relative to the folder Maquette
@@ -35,7 +36,7 @@ Options: --port <n> (default 8787) for every command; --json for call, tools and
 raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another DesignCraft CLI; --from <zip>
 to install the CLI from a downloaded copy of its release zip; --provider <name> and --model <id>
 for ask and models; --image <file> (repeatable) to show the model an image with ask; --project
-for config set and unset, to write .maquette/settings.json here instead of ~/.maquette.`;
+for config set, unset and edit, to use .maquette/settings.json here instead of ~/.maquette.`;
 function fail(message) {
     console.error(message);
     process.exit(1);
@@ -544,8 +545,45 @@ async function listTools(name) {
         return console.log(describe(tool));
     console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
 }
+// Opens a file in $VISUAL or $EDITOR in this terminal, waiting until it's closed, or else in
+// the system's text editor. Returns true when it waited.
+function openInEditor(path) {
+    const editor = (process.env.VISUAL || process.env.EDITOR || "").trim();
+    if (editor) {
+        const [cmd, ...args] = editor.split(/\s+/);
+        const r = spawnSync(cmd, [...args, path], { stdio: "inherit" });
+        if (r.error)
+            fail(`Couldn't run your editor, ${editor}: ${r.error.message}`);
+        return true;
+    }
+    const opener = process.platform === "darwin" ? ["open", "-t"] : process.platform === "win32" ? ["notepad"] : ["xdg-open"];
+    const r = spawnSync(opener[0], [...opener.slice(1), path], { stdio: "ignore" });
+    if (r.error || r.status)
+        fail(`Couldn't open an editor. Set EDITOR, or open ${path} yourself.`);
+    return false;
+}
+// `maquette config edit`: makes sure the settings file exists, writes the defaults beside it
+// for reference, and opens it. With an editor in the terminal, checks the file once it's closed.
+function editSettings(scope) {
+    const file = loaded.files[scope];
+    const made = ensure(file);
+    const reference = join(dirname(loaded.files.user), "settings.defaults.json");
+    writeFileSync(reference, `${JSON.stringify(defaults({ model: defaultModels.anthropic }), null, 2)}\n`);
+    console.log(`${made ? "Created" : "Opening"} ${shortPath(file)}${made ? ", empty, and opening it" : ""}.`);
+    console.log(paint(2, `Put in only the keys you want to change; the rest keep their defaults, and get newer ones as Maquette improves.
+Every key with its default is in ${tilde(reference)}, which Maquette rewrites and never reads;
+\`maquette config keys\` describes them.`));
+    if (!openInEditor(file))
+        return console.log(`When you've saved it, \`maquette config\` shows the result and any mistakes.`);
+    const after = load({ lenient: true });
+    if (after.warnings.length)
+        for (const w of after.warnings)
+            console.log(paint(33, w));
+    else
+        console.log(`${paint(32, "✓")} ${shortPath(file)} is valid. \`maquette config\` shows the result.`);
+}
 // `maquette config`: the settings, each with where its value comes from; `set`, `unset` and
-// `get` one key; `keys` describes every key.
+// `get` one key; `keys` describes every key; `edit` opens the file.
 function config(args) {
     const [action = "list", key, ...words] = args;
     const scope = projectScope ? "project" : "user";
@@ -577,8 +615,10 @@ function config(args) {
                     : settings.provider === "anthropic" ? `${keyEnv} isn't set; the SDK will look for an \`ant auth login\` profile`
                         : `${keyEnv} isn't set, which is fine for a local server`;
             console.log(`\n  Credentials for ${settings.provider}: ${credentials}.`);
-            console.log(`\n\`maquette config set <key> <value>\` writes ${tilde(loaded.files.user)}; add --project for this folder's.\n\`maquette config keys\` describes every key.`);
+            console.log(`\n\`maquette config set <key> <value>\` writes ${tilde(loaded.files.user)}, and \`maquette config edit\` opens it;\nadd --project for this folder's. \`maquette config keys\` describes every key.`);
         }
+        else if (action === "edit")
+            editSettings(scope);
         else if (action === "keys") {
             for (const [k, spec] of Object.entries(schema)) {
                 const extra = [spec.choices ? `one of ${spec.choices.join(", ")}` : spec.kind, spec.default !== undefined ? `default ${JSON.stringify(spec.default)}` : "", spec.env ? `env ${spec.env}` : ""].filter(Boolean).join("; ");
@@ -606,7 +646,7 @@ function config(args) {
             console.log(write(file, known(key), undefined) ? `Removed ${key} from ${shortPath(file)}.` : `${key} isn't set in ${shortPath(file)}.`);
         }
         else
-            fail(`maquette config takes list, keys, get <key>, set <key> <value> or unset <key>, not "${action}".`);
+            fail(`maquette config takes list, keys, edit, get <key>, set <key> <value> or unset <key>, not "${action}".`);
     }
     catch (e) {
         if (e instanceof SettingsError)

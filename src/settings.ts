@@ -184,3 +184,27 @@ export function write(path: string, key: string, value: unknown): boolean {
   writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`);
   return true;
 }
+
+// Every setting that has a default, as a settings file would hold it. `maquette config edit`
+// writes this beside the settings as a reference; Maquette never reads it back, so a default
+// that changes in a later version still reaches everyone who hasn't set that key.
+export function defaults(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const flat = { ...Object.fromEntries(Object.entries(schema).filter(([, spec]) => spec.default !== undefined).map(([k, spec]) => [k, spec.default])), ...extra };
+  for (const key of Object.keys(schema)) {
+    if (!(key in flat)) continue;
+    const path = key.split(".");
+    let into = out;
+    for (const k of path.slice(0, -1)) into = (into[k] ??= {}) as Record<string, unknown>;
+    into[path.at(-1)!] = flat[key];
+  }
+  return out;
+}
+
+// Creates an empty settings file ({}) when there's none yet. Returns true when it made one.
+export function ensure(path: string): boolean {
+  if (existsSync(path)) return false;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, "{}\n");
+  return true;
+}
