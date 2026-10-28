@@ -173,6 +173,11 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
 export async function runApp(session: AgentSession, server: ServerHandle, info: Info): Promise<void> {
   const { render } = await import("ink");
   let left = false;
+  // When the window changes size, the terminal rewraps the rows already on screen, so Ink's
+  // count of the frame's rows no longer holds and pieces are left behind. Clear what's visible
+  // first (what was above stays in the scrollback); Ink's own resize handler, registered after
+  // this one, then draws the live frame afresh at the top. Same as Claude Code.
+  process.stdout.on("resize", () => process.stdout.write("\x1b[2J\x1b[H"));
   const instance = render(h(App, { session, server, info, onExit: () => (left = true) }), { exitOnCtrlC: false, patchConsole: true });
   await instance.waitUntilExit();
   if (!left) await session.submit("exit");
