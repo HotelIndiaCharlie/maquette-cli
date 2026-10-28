@@ -33,7 +33,13 @@ export function startLines(info: Info, root: string, status: Status): string[] {
 export function App({ session, server, info, onExit }: { session: AgentSession; server: ServerLike; info: Info; onExit: () => void }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const columns = (stdout as NodeJS.WriteStream).columns || 80;
+  const [columns, setColumns] = useState((stdout as NodeJS.WriteStream).columns || 80);
+  // Redraw at the new width when the window is resized.
+  useEffect(() => {
+    const onResize = () => setColumns((stdout as NodeJS.WriteStream).columns || 80);
+    stdout.on("resize", onResize);
+    return () => void stdout.off("resize", onResize);
+  }, []);
   const [items, setItems] = useState<Item[]>(() => [{ key: 0, kind: "banner", lines: [...bannerText(columns).split("\n"), ...startLines(info, server.root, session.status)] }]);
   const [segments, setSegments] = useState<Segment[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,7 +165,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
         setHelpShown(false);
       },
     }),
-    h(Footer, { status, busy, columns, helpShown }),
+    h(Footer, { status, busy, helpShown }),
   );
 }
 

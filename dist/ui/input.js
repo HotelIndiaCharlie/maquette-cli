@@ -229,7 +229,9 @@ export function InputBox(props) {
     const slashes = suggestions(value);
     const sel = Math.min(st.current.sel, Math.max(0, slashes.length - 1));
     const width = Math.max(0, ...slashes.map((c) => c.length));
-    return h(Box, { flexDirection: "column" }, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), ...rows, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), hint ? h(Text, { dimColor: true }, `  ${hint.slice(0, 12).join("  ")}${hint.length > 12 ? "  …" : ""}`) : null, ...slashes.map((c, i) => h(Text, { key: c, color: i === sel ? "cyan" : undefined, bold: i === sel }, `  ${i === sel ? "›" : " "} ${c.padEnd(width)}  `, h(Text, { dimColor: i !== sel, color: i === sel ? "cyan" : undefined }, slashAbout[c]))));
+    // The rules are the box's own borders, so Ink lays them out to the window's width and
+    // redraws them when it changes; a fixed row of dashes would wrap after a resize.
+    return h(Box, { flexDirection: "column" }, h(Box, { flexDirection: "column", borderStyle: "single", borderLeft: false, borderRight: false, borderDimColor: true }, ...rows), hint ? h(Text, { dimColor: true }, `  ${hint.slice(0, 12).join("  ")}${hint.length > 12 ? "  …" : ""}`) : null, ...slashes.map((c, i) => h(Text, { key: c, color: i === sel ? "cyan" : undefined, bold: i === sel }, `  ${i === sel ? "›" : " "} ${c.padEnd(width)}  `, h(Text, { dimColor: i !== sel, color: i === sel ? "cyan" : undefined }, slashAbout[c]))));
 }
 // The slash commands that match what's typed so far, while only the command is typed.
 function suggestions(value) {

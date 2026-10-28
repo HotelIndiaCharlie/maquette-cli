@@ -29,12 +29,13 @@ export function PermissionPrompt({ name, input }) {
     const args = summarise(input);
     return h(Box, { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingLeft: 1, paddingRight: 1, marginTop: 1 }, h(Text, {}, h(Text, { bold: true }, `Allow ${name}`), args ? h(Text, { dimColor: true }, ` ${gist(args, 60)}`) : null, "?"), Object.keys(input).length ? h(Text, { dimColor: true }, gist(JSON.stringify(input, null, 2), 600)) : null, h(Text, {}, h(Text, { bold: true, color: "green" }, "y"), " yes   ", h(Text, { bold: true, color: "red" }, "n"), " no   ", h(Text, { bold: true, color: "yellow" }, "a"), " always, for this tool this session"));
 }
-export function Footer({ status, busy, columns, helpShown }) {
+export function Footer({ status, busy, helpShown }) {
     const left = busy ? "esc to interrupt" : helpShown ? "? to hide shortcuts" : "? for shortcuts";
     const tokens = `${count(status.tokens.input + status.tokens.cacheRead + status.tokens.cacheWrite)} in / ${count(status.tokens.output)} out`;
     const right = [status.model, status.effort, status.textProtocol ? `${status.mode} · text calls` : status.mode, tokens, status.cost !== undefined ? dollars(status.cost) : null].filter(Boolean).join(" · ");
-    const gap = Math.max(1, columns - left.length - right.length - 2);
-    return h(Box, {}, h(Text, { dimColor: true }, ` ${left}${" ".repeat(gap)}${right}`));
+    // Two texts pushed apart in a box that fills the window, so the footer reflows with it;
+    // when the window is too narrow the left label gives way, the status stays whole.
+    return h(Box, { justifyContent: "space-between" }, h(Box, { flexShrink: 1, marginRight: 2 }, h(Text, { dimColor: true, wrap: "truncate" }, ` ${left}`)), h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, `${right} `)));
 }
 export function Notices({ notices }) {
     if (!notices.length)

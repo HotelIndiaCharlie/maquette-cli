@@ -40,12 +40,13 @@ export function PermissionPrompt({ name, input }: { name: string; input: Record<
   );
 }
 
-export function Footer({ status, busy, columns, helpShown }: { status: Status; busy: boolean; columns: number; helpShown: boolean }) {
+export function Footer({ status, busy, helpShown }: { status: Status; busy: boolean; helpShown: boolean }) {
   const left = busy ? "esc to interrupt" : helpShown ? "? to hide shortcuts" : "? for shortcuts";
   const tokens = `${count(status.tokens.input + status.tokens.cacheRead + status.tokens.cacheWrite)} in / ${count(status.tokens.output)} out`;
   const right = [status.model, status.effort, status.textProtocol ? `${status.mode} · text calls` : status.mode, tokens, status.cost !== undefined ? dollars(status.cost) : null].filter(Boolean).join(" · ");
-  const gap = Math.max(1, columns - left.length - right.length - 2);
-  return h(Box, {}, h(Text, { dimColor: true }, ` ${left}${" ".repeat(gap)}${right}`));
+  // Two texts pushed apart in a box that fills the window, so the footer reflows with it;
+  // when the window is too narrow the left label gives way, the status stays whole.
+  return h(Box, { justifyContent: "space-between" }, h(Box, { flexShrink: 1, marginRight: 2 }, h(Text, { dimColor: true, wrap: "truncate" }, ` ${left}`)), h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, `${right} `)));
 }
 
 export function Notices({ notices }: { notices: { text: string; level: "info" | "warn" | "error" }[] }) {

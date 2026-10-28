@@ -21,7 +21,13 @@ export function startLines(info, root, status) {
 export function App({ session, server, info, onExit }) {
     const { exit } = useApp();
     const { stdout } = useStdout();
-    const columns = stdout.columns || 80;
+    const [columns, setColumns] = useState(stdout.columns || 80);
+    // Redraw at the new width when the window is resized.
+    useEffect(() => {
+        const onResize = () => setColumns(stdout.columns || 80);
+        stdout.on("resize", onResize);
+        return () => void stdout.off("resize", onResize);
+    }, []);
     const [items, setItems] = useState(() => [{ key: 0, kind: "banner", lines: [...bannerText(columns).split("\n"), ...startLines(info, server.root, session.status)] }]);
     const [segments, setSegments] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -142,7 +148,7 @@ export function App({ session, server, info, onExit }) {
             setNotices([]);
             setHelpShown(false);
         },
-    }), h(Footer, { status, busy, columns, helpShown }));
+    }), h(Footer, { status, busy, helpShown }));
 }
 // Draws the app on this terminal and resolves when the person leaves.
 export async function runApp(session, server, info) {
