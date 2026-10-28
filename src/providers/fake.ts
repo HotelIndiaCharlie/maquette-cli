@@ -8,6 +8,7 @@ export type FakeTurn = { text?: string; calls?: { name: string; input?: Record<s
 export class FakeProvider implements Provider {
   readonly name = "fake";
   readonly model = "fake";
+  readonly vision = true;
   requests: ChatRequest[] = [];
   turns: FakeTurn[];
   count = 0;

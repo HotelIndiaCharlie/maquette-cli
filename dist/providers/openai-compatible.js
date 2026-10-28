@@ -66,6 +66,10 @@ export class OpenAICompatibleProvider {
         this.model = model ?? "";
         this.options = options;
     }
+    // From the settings: when false, images are left out with a note.
+    get vision() {
+        return this.options.vision;
+    }
     get base() {
         return this.options.baseUrl.replace(/\/+$/, "");
     }

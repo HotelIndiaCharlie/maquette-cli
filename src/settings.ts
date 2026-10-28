@@ -14,6 +14,7 @@ type Spec = { kind: Kind; default?: unknown; choices?: readonly string[]; min?: 
 export const providerNames = ["anthropic", "openai-compatible"] as const;
 export type ProviderName = (typeof providerNames)[number];
 export const efforts = ["default", "low", "medium", "high", "xhigh", "max"] as const;
+export const permissionModes = ["ask", "auto", "plan"] as const;
 
 // Every setting, by its dotted key.
 export const schema: Record<string, Spec> = {
@@ -31,6 +32,7 @@ export const schema: Record<string, Spec> = {
   "providers.openai-compatible.apiKeyEnv": { kind: "string", default: "OPENAI_API_KEY", about: "The environment variable holding the API key, if the server needs one" },
   "providers.openai-compatible.vision": { kind: "boolean", default: true, about: "Whether the model accepts images; when false, images are left out with a note" },
   "providers.openai-compatible.maxTokens": { kind: "number", min: 1, about: "The longest reply, in tokens; unset leaves it to the server" },
+  "permissions.mode": { kind: "string", default: "ask", choices: permissionModes, env: "MAQUETTE_PERMISSIONS", about: "What the model may do unasked at the prompt: ask (reads run, changes ask y/n/always), auto (everything runs), plan (reading only)" },
 };
 
 export type Settings = {
@@ -42,6 +44,7 @@ export type Settings = {
     anthropic: { apiKeyEnv: string; baseUrl?: string; effort: (typeof efforts)[number]; maxTokens: number; refusalFallback: boolean; compaction: boolean };
     "openai-compatible": { baseUrl: string; apiKeyEnv: string; vision: boolean; maxTokens?: number };
   };
+  permissions: { mode: (typeof permissionModes)[number] };
 };
 
 export type Origin = { source: Source; path?: string };

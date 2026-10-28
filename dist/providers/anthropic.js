@@ -34,6 +34,7 @@ export function toAnthropic(messages) {
 export class AnthropicProvider {
     name = "anthropic";
     model;
+    vision = true;
     options;
     #client;
     constructor(model, options) {

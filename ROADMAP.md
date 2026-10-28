@@ -55,9 +55,11 @@ The foundation everything else reads from.
 
 **Done when:** `maquette ask "what tools do you have"` prints a streamed answer from Anthropic, and the same command with `MAQUETTE_PROVIDER=openai-compatible` and Ollama running does too.
 
-### Phase 2: The agent loop and the Ink terminal UI
+### Phase 2: The agent loop and the Ink terminal UI (done)
 
 This is the phase that makes it an AI terminal. Tracked in Linear as HOT-52.
+
+**As built:** `src/server.ts` (engine, queue, HTTP; emits events, prints nothing), `src/agent/` (`session.ts` the loop, `route.ts`, `permissions.ts`, `prompt.ts`, `shell.ts`, `cost.ts`, `events.ts`) and `src/ui/` (Ink components as plain `.ts` through `h`). The permission prompt is answered before a call enters the queue, so HTTP callers are never blocked on a `y/n`. `open_document` counts as a change, since it switches everyone's document. `always` lasts the session; settings can't hold lists yet. A tool already running isn't cancelled by Ctrl-C; the loop stops after it. Direct tool lines and `!` commands typed by the person never ask. `/compact`, `/mcp` and `/skills` wait for their phases. Tests run against a stub engine (`test/stub-engine.ts`) and the fake provider; `npm run smoke` drives one conversation through the screen. Not yet run against the live Claude API or Ollama from the prompt.
 
 - **Routing a typed line.** If the first word is a tool name or a prompt command, it's a direct call, as today. If it starts with `/`, it's a slash command. If it starts with `!`, it's a shell command run in Maquette's folder, output shown in the terminal and kept in the conversation so the model can see it. Anything else is a message to the model.
 - **The loop** (`src/agent/loop.ts`): send history plus tool list to the provider; for each `tool_call`, run it through the existing `enqueue()` so it's serialised with HTTP callers and gets the same log line (time, call number, tool, args, ok/error, duration, image path); append the result; repeat until the model stops. Tool results with images go back to the model as images, so a vision-capable model can look at its own renders.
@@ -67,6 +69,7 @@ This is the phase that makes it an AI terminal. Tracked in Linear as HOT-52.
 - **Interrupting.** Ctrl-C during a model turn stops the turn (and the tool in flight if DesignCraft allows), not Maquette. Ctrl-C on an empty line still exits.
 - **Status line** under the prompt: model, permission mode, tokens used, whether other sessions are connected over HTTP.
 - `maquette ask "<message>"` for one-shot, non-interactive use from scripts and CI.
+- New setting `permissions.mode` (`ask`, `auto`, `plan`; env `MAQUETTE_PERMISSIONS`).
 
 **The screen is built with [Ink](https://github.com/vadimdemedes/ink) from the start**, the React-for-terminals library Claude Code uses, so the prompt is rewritten once rather than in readline and then again:
 
@@ -104,7 +107,8 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 
 ### Phase 5: Skills and project instructions
 
-- `MAQUETTE.md` in the project folder (and `~/.maquette/MAQUETTE.md`) is read into the system prompt, like `CLAUDE.md`.
+- `MAQUETTE.md` in the project folder is read into the system prompt, like `CLAUDE.md`. It is project-level only: the design memory of one document, kept next to it. There is no user-level file.
+- `/init` writes it. It surveys the open document (inspect, every page rendered, the stories' text), asks two or three questions (what the document is for and who reads it, what the agent may change, whether a house style exists), and writes `MAQUETTE.md` as design memory, not inventory: purpose and audience, voice, visual identity by role (palette, type, grid, imagery), conventions, decisions stated and inferred (inferred ones marked so the person can confirm or strike them), do and don't. On a rerun it proposes changes rather than rewriting. Facts with bounds and item IDs stay out; the agent gets those from `inspect_document`. The survey step is a coarse tool, `document_survey`, built as a tool module; the writing step is a bundled skill. Phase 2 ships `/init` as a stub that says what it will do (HOT-58); the real one is HOT-59.
 - Skills live in `.maquette/skills/<name>/SKILL.md` and `~/.maquette/skills/`, with the same frontmatter as Claude Code's (`name`, `description`). `.claude/skills/` is read too, so one skill folder serves both tools. Only name and description go into the system prompt; the body is loaded when the model invokes a skill (through a `skill` tool) or you type `/<name>`.
 - Maquette ships with a few: `chart` (how to go from a CSV and a sentence to a placed chart with the spec format), `report-review` (render every page, look at each, list layout problems), `designcraft` (the engine's conventions).
 - `/skills` lists them; `maquette skills` from outside.
@@ -129,12 +133,13 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 
 | Path | What it will be |
 | --- | --- |
-| `src/cli.ts` | Argument parsing and the subcommands; the prompt and server move out |
+| `src/cli.ts` | Argument parsing and the subcommands; the prompt and server have moved out |
+| `src/args.ts` | Typed lines to tool arguments, shared by the prompt, `maquette call` and the text protocol |
 | `src/ui/` | The Ink screen: banner, transcript, live answer, tool lines, permission prompt, input box, footer, notices |
 | `src/server.ts` | The HTTP server and the call queue (unchanged behaviour) |
 | `src/settings.ts` | Settings files, env overrides, `maquette config` |
 | `src/providers/` | `types.ts`, `anthropic.ts`, `openai-compatible.ts`, `fake.ts` |
-| `src/agent/` | `loop.ts`, `routing.ts`, `prompt.ts`, `permissions.ts`, `tools/` (bash, files, image); emits the events `src/ui/` draws |
+| `src/agent/` | `session.ts` (the loop), `route.ts`, `prompt.ts`, `permissions.ts`, `shell.ts`, `cost.ts`, later `tools/` (bash, files, image); emits the events `src/ui/` draws |
 | `src/mcp/` | `clients.ts` (servers from settings and `.mcp.json`), `serve.ts` (`maquette mcp`) |
 | `src/skills.ts` | Skill discovery and loading |
 | `src/sessions.ts` | JSONL history, resume, compaction |
@@ -157,6 +162,6 @@ Phases 3, 4 and 5 are independent of each other and can land in any order once P
 
 ## Open questions
 
-- **Local models and tool calling.** Small local models call tools unreliably. Phase 1 should detect a model that can't call tools and fall back to a text protocol (the model writes `maquette call …` lines, Maquette runs them), so a local model is still usable, just less smooth.
+- **Local models and tool calling.** Small local models call tools unreliably. Phase 2 falls back to a text protocol when the server says the model can't call tools (the model writes `maquette call …` lines, Maquette asks and runs them). A model that accepts tools but calls them badly still gets no help.
 - **Images for local models.** Only some local models accept images. When the model can't see a render, Maquette should run DesignCraft's checks (overset, overlap, out of frame, which `chart_create` already reports) and give the model the text instead.
-- **Where the permission prompt lives** when a tool call comes from the model while an HTTP caller is also queued. The queue already serialises calls; the prompt must not block HTTP callers for longer than one answer.
+- ~~**Where the permission prompt lives**~~ Settled in Phase 2: the prompt is answered before the call is queued, so HTTP callers never wait on it.

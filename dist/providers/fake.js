@@ -1,6 +1,7 @@
 export class FakeProvider {
     name = "fake";
     model = "fake";
+    vision = true;
     requests = [];
     turns;
     count = 0;
