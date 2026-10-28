@@ -3,12 +3,14 @@
 // ToolFactory, listed in src/tools/index.ts.
 import type { DesignCraft, ToolResult } from "../designcraft.ts";
 
-export type ToolDef = { name: string; description: string; inputSchema: Record<string, unknown> };
+// readOnlyHint marks a tool that only reads, so the model may call it without asking.
+export type ToolDef = { name: string; description: string; inputSchema: Record<string, unknown>; annotations?: { readOnlyHint?: boolean } };
 
 export type Context = {
   dc: DesignCraft; // the one DesignCraft engine, shared by every module
   root: string; // the folder Maquette runs in; relative paths start here
   readRoots: string[]; // the folders a tool may read data files from
+  warnings: () => string[]; // what opening the document warned about, this time and when it was saved
 };
 
 export type ToolModule = {

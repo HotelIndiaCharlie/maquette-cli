@@ -9,7 +9,7 @@ export const slashAbout = {
     "/clear": "start a new conversation",
     "/cost": "tokens and dollars this session",
     "/tools": "the tools, one line each",
-    "/init": "write MAQUETTE.md, the project's design memory (coming)",
+    "/init": "survey the document and write MAQUETTE.md, the project's design memory",
 };
 export const slashCommands = Object.keys(slashAbout);
 export function route(line, isTool) {

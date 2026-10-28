@@ -1,14 +1,14 @@
 // The agent loop, routing and permissions, against the fake provider and a fake server: no
 // screen, no key, no DesignCraft.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { AgentEvent } from "../../src/agent/events.ts";
 import { classify, decide } from "../../src/agent/permissions.ts";
 import { route } from "../../src/agent/route.ts";
-import { AgentSession } from "../../src/agent/session.ts";
+import { AgentSession, openWarnings } from "../../src/agent/session.ts";
 import { toAnthropic } from "../../src/providers/anthropic.ts";
 import { FakeProvider, type FakeTurn } from "../../src/providers/fake.ts";
 import { type ChatEvent, type ChatRequest, ProviderError, systemText, type ToolResultPart } from "../../src/providers/types.ts";
@@ -226,30 +226,59 @@ test("/permissions persists to the project file, /model and /provider switch, /c
   assert.ok(!existsSync(join(projectFile, "..", "nothing")));
 });
 
-test("MAQUETTE.md in the folder goes into the model's instructions; /init is a stub that touches nothing", async () => {
-  const { s, server, provider, events } = session([{ text: "ok" }, { text: "ok" }]);
-  await s.submit("/init");
-  const stub = names(events, "output").at(-1) as { text: string };
-  assert.match(stub.text, /MAQUETTE\.md/);
-  assert.match(stub.text, /isn't built yet/);
-  assert.doesNotMatch(stub.text, /vision/, "the fake provider can see");
-  assert.equal(server.calls.length, 0);
-  assert.ok(!existsSync(join(server.root, "MAQUETTE.md")));
+test("MAQUETTE.md in the folder goes into the model's instructions, fenced after the rule for weighing it", async () => {
+  const { s, server, provider } = session([{ text: "ok" }, { text: "ok" }]);
   await s.submit("hello");
   assert.doesNotMatch(systemText(provider.requests[0].system), /MAQUETTE\.md, as the person keeps it/);
-
   writeFileSync(join(server.root, "MAQUETTE.md"), "# Annual report\nVoice: plain and warm. Palette: process inks.\n");
-  await s.submit("/init");
-  assert.match((names(events, "notice").at(-1) as { text: string }).text, /MAQUETTE\.md exists/);
-  assert.equal(server.calls.length, 0);
   await s.submit("again");
   assert.match(systemText(provider.requests[1].system), /MAQUETTE\.md, as the person keeps it:\n~~~markdown\n# Annual report\nVoice: plain and warm\. Palette: process inks\.\n~~~$/);
+});
 
-  // Without vision, the stub says /init will need it.
-  const blind = session([]);
+test("/init sends the skill to the model as one turn, shown as /init; a rerun, no vision, a note and a house skill change what it says", async () => {
+  const { s, server, provider, events } = session([{ text: "Which document?" }, { text: "ok" }, { text: "ok" }]);
+  await s.submit("/init");
+  assert.equal((names(events, "user")[0] as { text: string }).text, "/init");
+  const sent = (provider.requests[0].messages[0].parts[0] as { text: string }).text;
+  assert.match(sent, /^The person typed \/init\. Follow these instructions\.\n\n# \/init: write the project's design memory/);
+  assert.doesNotMatch(sent, /^---/m, "the frontmatter stays out");
+  assert.match(sent, /Call `document_survey`/);
+  assert.match(sent, /There's no MAQUETTE\.md yet\.$/);
+  assert.equal(server.calls.length, 0, "the model makes the calls, not /init");
+  assert.equal(s.history.length, 2);
+
+  writeFileSync(join(server.root, "MAQUETTE.md"), "# Report\n");
+  await s.submit("/init the cover changed");
+  const rerun = (provider.requests[1].messages.at(-1)!.parts.at(-1) as { text: string }).text;
+  assert.match(rerun, /this is a rerun: propose changes, never rewrite/);
+  assert.match(rerun, /The person added: the cover changed$/);
+  assert.equal((names(events, "user").at(-1) as { text: string }).text, "/init the cover changed");
+
+  mkdirSync(join(server.root, ".maquette", "skills", "init"), { recursive: true });
+  writeFileSync(join(server.root, ".maquette", "skills", "init", "SKILL.md"), "---\nname: init\n---\nOur house survey.\n");
+  await s.submit("/init");
+  assert.match((provider.requests[2].messages.at(-1)!.parts.at(-1) as { text: string }).text, /Follow these instructions\.\n\nOur house survey\.\n\n/);
+  assert.match((names(events, "notice").at(-1) as { text: string }).text, /\/init follows .*\.maquette\/skills\/init\/SKILL\.md, in place of Maquette's own/);
+
+  const blind = session([{ text: "ok" }]);
   Object.defineProperty(blind.provider, "vision", { value: false });
   await blind.s.submit("/init");
-  assert.match((names(blind.events, "output").at(-1) as { text: string }).text, /need a model with vision/);
+  assert.match((names(blind.events, "notice")[0] as { text: string }).text, /can't see images.*text-only and weaker/);
+  assert.match((blind.provider.requests[0].messages[0].parts[0] as { text: string }).text, /This model can't see images/);
+});
+
+test("opening a document that warns: a notice once, at open, from the model's call or a typed one", async () => {
+  const { s, events } = session([{ calls: [{ name: "open_document", input: { path: "Package/Brochure.idml" } }] }, { text: "Opened." }], { mode: "auto" });
+  await s.submit("open the brochure");
+  const warned = names(events, "notice").filter((e) => /Opened with 2 warnings/.test((e as { text: string }).text));
+  assert.equal(warned.length, 1);
+  assert.match((warned[0] as { text: string }).text, /Missing link: Links\/cover\.tif; Font Akzidenz Bold isn't installed\. They're kept beside the document/);
+  await s.submit("open_document Package/Brochure.idml");
+  assert.equal(names(events, "notice").filter((e) => /Opened with 2 warnings/.test((e as { text: string }).text)).length, 2);
+  await s.submit("open_document example/report.designcraft");
+  assert.equal(names(events, "notice").filter((e) => /Opened with/.test((e as { text: string }).text)).length, 2);
+  assert.deepEqual(openWarnings(JSON.stringify({ warnings: ["a"], recordedWarnings: ["b"] })), ["a", "b"], "a reopened working copy brings back what was recorded beside it");
+  assert.deepEqual(openWarnings("Opened it."), []);
 });
 
 test("the instructions are three blocks: the same core everywhere, the session's environment, and the project last and uncached", async () => {
