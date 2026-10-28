@@ -3,7 +3,7 @@
 // streams POST {baseUrl}/chat/completions over server-sent events and lists models with
 // GET {baseUrl}/models.
 import type { Settings } from "../settings.ts";
-import { type AssistantMessage, type ChatEvent, type ChatRequest, type ImagePart, type Message, type ModelInfo, type Provider, ProviderError, type StopReason, type ToolCallPart } from "./types.ts";
+import { type AssistantMessage, type ChatEvent, type ChatRequest, type ImagePart, type Message, type ModelInfo, type Provider, ProviderError, type StopReason, type ToolCallPart, type Usage } from "./types.ts";
 
 type Options = Settings["providers"]["openai-compatible"];
 type Chat = { role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string };
@@ -59,6 +59,47 @@ export async function* events(body: ReadableStream<Uint8Array>): AsyncIterable<s
   }
   if (buffer.startsWith("data:")) data.push(buffer.slice(buffer[5] === " " ? 6 : 5).replace(/\r$/, ""));
   if (data.length) yield data.join("\n");
+}
+
+// Some servers send a reasoning model's thinking inside the text, between <think> and </think>,
+// rather than in a field of its own. This takes it out as the text streams in, holding back the
+// end of a piece that could be the start of a tag split across two pieces.
+export class ThinkSplitter {
+  #inside = false;
+  #held = "";
+
+  push(piece: string): { text: string; thinking: string } {
+    let rest = this.#held + piece;
+    this.#held = "";
+    let text = "";
+    let thinking = "";
+    for (;;) {
+      const tag = this.#inside ? "</think>" : "<think>";
+      const at = rest.indexOf(tag);
+      const end = at >= 0 ? at : rest.length - partialTag(rest, tag);
+      if (this.#inside) thinking += rest.slice(0, end);
+      else text += rest.slice(0, end);
+      if (at < 0) {
+        this.#held = rest.slice(end);
+        return { text, thinking };
+      }
+      this.#inside = !this.#inside;
+      rest = rest.slice(at + tag.length);
+    }
+  }
+
+  // What's still held back once the reply is over.
+  flush(): { text: string; thinking: string } {
+    const held = this.#held;
+    this.#held = "";
+    return this.#inside ? { text: "", thinking: held } : { text: held, thinking: "" };
+  }
+}
+
+// How many characters at the end of `s` could begin `tag`.
+function partialTag(s: string, tag: string): number {
+  for (let n = Math.min(tag.length - 1, s.length); n > 0; n--) if (tag.startsWith(s.slice(-n))) return n;
+  return 0;
 }
 
 export class OpenAICompatibleProvider implements Provider {
@@ -122,9 +163,18 @@ export class OpenAICompatibleProvider implements Provider {
     };
     const res = await this.request("/chat/completions", { method: "POST", body: JSON.stringify(body), signal: request.signal });
     let text = "";
+    let thinking = "";
     let finish = "";
     let model = this.model;
-    let usage: { input: number; output: number } | undefined;
+    let usage: Usage | undefined;
+    const split = new ThinkSplitter();
+    // The visible text, without the blank lines a model leaves after its thinking.
+    const visible = function* (piece: string): Iterable<ChatEvent> {
+      const out = text ? piece : piece.trimStart();
+      if (!out) return;
+      text += out;
+      yield { type: "text", text: out };
+    };
     const calls: { id: string; name: string; args: string }[] = [];
     for await (const data of events(res.body!)) {
       if (data === "[DONE]") break;
@@ -136,13 +186,21 @@ export class OpenAICompatibleProvider implements Provider {
       }
       if (chunk.error) throw new ProviderError(`${this.base} reported an error mid-reply: ${chunk.error.message ?? JSON.stringify(chunk.error)}`);
       if (chunk.model) model = chunk.model;
-      if (chunk.usage) usage = { input: chunk.usage.prompt_tokens ?? 0, output: chunk.usage.completion_tokens ?? 0 };
+      if (chunk.usage) {
+        const reasoning = chunk.usage.completion_tokens_details?.reasoning_tokens;
+        usage = { input: chunk.usage.prompt_tokens ?? 0, output: chunk.usage.completion_tokens ?? 0, ...(reasoning ? { reasoning } : {}) };
+      }
       const choice = chunk.choices?.[0];
       if (!choice) continue;
       const delta = choice.delta ?? {};
+      // Reasoning in a field of its own: reasoning_content from llama.cpp, LM Studio, vLLM and
+      // DeepSeek; reasoning from Ollama, OpenRouter and newer vLLM.
+      const reasoning = delta.reasoning_content ?? delta.reasoning;
+      if (typeof reasoning === "string") thinking += reasoning;
       if (typeof delta.content === "string" && delta.content) {
-        text += delta.content;
-        yield { type: "text", text: delta.content };
+        const piece = split.push(delta.content);
+        thinking += piece.thinking;
+        yield* visible(piece.text);
       }
       for (const tc of delta.tool_calls ?? []) {
         const at = calls[tc.index ?? calls.length] ??= { id: "", name: "", args: "" };
@@ -156,6 +214,9 @@ export class OpenAICompatibleProvider implements Provider {
       }
       if (choice.finish_reason) finish = choice.finish_reason;
     }
+    const last = split.flush();
+    thinking += last.thinking;
+    yield* visible(last.text);
     const message: AssistantMessage = { role: "assistant", parts: text ? [{ type: "text", text }] : [] };
     for (const [i, c] of calls.entries()) {
       if (!c) continue;
@@ -171,7 +232,7 @@ export class OpenAICompatibleProvider implements Provider {
       yield { type: "tool_call", call };
     }
     const stop = calls.length && (finish === "stop" || !finish) ? "tool_use" : (stops[finish] ?? (finish ? "other" : "end"));
-    yield { type: "done", message, stop, model, ...(usage ? { usage } : {}) };
+    yield { type: "done", message, stop, model, ...(usage ? { usage } : {}), ...(thinking.trim() ? { thinking: thinking.trim() } : {}) };
   }
 
   async models(): Promise<ModelInfo[]> {

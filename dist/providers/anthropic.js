@@ -71,7 +71,8 @@ export class AnthropicProvider {
             ...(request.tools?.length ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: { type: "object", ...t.inputSchema } })) } : {}),
             // Caches everything up to the last block, so each turn reads the one before from cache.
             cache_control: { type: "ephemeral" },
-            ...(modern ? { thinking: { type: "adaptive" } } : {}),
+            // Summarised, so the thinking comes back readable: on some models the default leaves it out.
+            ...(modern ? { thinking: { type: "adaptive", display: "summarized" } } : {}),
             ...(modern && effort !== "default" ? { output_config: { effort } } : {}),
             ...(refusalFallback ? { fallbacks: "default" } : {}),
             ...(modern && compaction ? { context_management: { edits: [{ type: "compact_20260112" }] } } : {}),
@@ -99,8 +100,11 @@ export class AnthropicProvider {
             throw this.explain(e);
         }
         const message = { role: "assistant", parts: [], native: { provider: "anthropic", content: final.content } };
+        const thinking = [];
         for (const block of final.content) {
-            if (block.type === "text")
+            if (block.type === "thinking" && block.thinking)
+                thinking.push(block.thinking);
+            else if (block.type === "text")
                 message.parts.push({ type: "text", text: block.text });
             else if (block.type === "tool_use") {
                 const call = { type: "tool_call", id: block.id, name: block.name, input: (block.input ?? {}) };
@@ -116,6 +120,7 @@ export class AnthropicProvider {
             stop: stops[final.stop_reason ?? ""] ?? "other",
             model: final.model,
             usage: { input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 },
+            ...(thinking.length ? { thinking: thinking.join("\n\n") } : {}),
             ...(final.stop_reason === "refusal" ? { detail: details?.explanation || (details?.category ? `category: ${details.category}` : undefined) } : {}),
         };
     }

@@ -202,7 +202,7 @@ maquette config set model qwen3:14b
 maquette ask "what can you do here?"
 ```
 
-The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. A model that can't call tools still works at the prompt, through the `maquette call` text protocol described under [The prompt](#the-prompt), just less smoothly.
+The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. A reasoning model's thinking, whether the server sends it in a field of its own or between `<think>` tags, is kept out of the answer. A model that can't call tools still works at the prompt, through the `maquette call` text protocol described under [The prompt](#the-prompt), just less smoothly.
 
 ## How it behaves
 
@@ -291,6 +291,8 @@ npm run test:all     # all of the above
 npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
+
+To see what the agent does on each turn (every request to the model with its thinking, every tool call with where its time went, and why anything failed), run [Phoenix](https://github.com/Arize-ai/phoenix) and start Maquette with `MAQUETTE_TRACE=1 npm run dev`. [`docs/telemetry.md`](docs/telemetry.md) has the details.
 
 `dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 

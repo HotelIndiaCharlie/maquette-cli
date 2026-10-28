@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { OpenAICompatibleProvider, toOpenAI } from "../../src/providers/openai-compatible.ts";
+import { OpenAICompatibleProvider, ThinkSplitter, toOpenAI } from "../../src/providers/openai-compatible.ts";
 import { type ChatEvent, type Message, ProviderError } from "../../src/providers/types.ts";
 import { closeAll, closedPort, drain, json, mock, sse } from "./mock.ts";
 
@@ -91,6 +91,40 @@ test("arguments sent as a whole object replace, rather than add to, what came be
   assert.ok(call?.type === "tool_call");
   assert.deepEqual(call.call.input, { page: 0, scale: 2 });
   assert.equal(call.call.error, undefined);
+});
+
+test("a reasoning model's thinking, in its own field or between <think> tags, comes with the reply and not in its text", async () => {
+  const server = await mock((_, res) =>
+    sse(res, [
+      chunk({ role: "assistant", reasoning_content: "The person wants " }),
+      chunk({ reasoning: "page one." }),
+      chunk({ content: "<thi" }),
+      chunk({ content: "nk>Page one is 0.</th" }),
+      chunk({ content: "ink>\n\nRendering " }),
+      chunk({ content: "page one." }, "stop"),
+      { model: "qwen3:32b", choices: [], usage: { prompt_tokens: 120, completion_tokens: 30, completion_tokens_details: { reasoning_tokens: 22 } } },
+      "[DONE]",
+    ]),
+  );
+  const events = await drain(new OpenAICompatibleProvider("qwen3:32b", options(server.url)).chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }] }));
+  await server.close();
+  assert.deepEqual(events.filter((e) => e.type === "text").map((e) => e.text), ["Rendering ", "page one."]);
+  const done = events.at(-1);
+  assert.ok(done?.type === "done");
+  assert.equal(done.thinking, "The person wants page one.Page one is 0.");
+  assert.deepEqual(done.message.parts, [{ type: "text", text: "Rendering page one." }]);
+  assert.deepEqual(done.usage, { input: 120, output: 30, reasoning: 22 });
+});
+
+test("the <think> splitter holds back only what could be the start of a tag", () => {
+  const split = new ThinkSplitter();
+  assert.deepEqual(split.push("a < b and <t"), { text: "a < b and ", thinking: "" });
+  assert.deepEqual(split.push("able>"), { text: "<table>", thinking: "" });
+  assert.deepEqual(split.push("<think>hm"), { text: "", thinking: "hm" });
+  assert.deepEqual(split.flush(), { text: "", thinking: "" });
+  const open = new ThinkSplitter();
+  assert.deepEqual(open.push("<think>cut off </thi"), { text: "", thinking: "cut off " });
+  assert.deepEqual(open.flush(), { text: "", thinking: "</thi" }, "a reply that ends inside the thinking keeps it as thinking");
 });
 
 test("lists models from /models, leaving out entries without an id", async () => {

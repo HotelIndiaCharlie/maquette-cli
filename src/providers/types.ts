@@ -19,7 +19,8 @@ export type Message = UserMessage | AssistantMessage;
 export type ToolSpec = { name: string; description?: string; inputSchema: Record<string, unknown> };
 export type ChatRequest = { system: string; messages: Message[]; tools?: ToolSpec[]; signal?: AbortSignal };
 
-export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+// `reasoning` is the part of `output` the model spent thinking, when the server says.
+export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number };
 // end: the model finished; tool_use: it wants its tool calls run; max_tokens: it was cut off;
 // refusal: it declined.
 export type StopReason = "end" | "tool_use" | "max_tokens" | "refusal" | "other";
@@ -28,7 +29,9 @@ export type ChatEvent =
   | { type: "text"; text: string } // more of the reply, as it's written
   | { type: "notice"; text: string } // something the person should know, such as a fallback model taking over
   | { type: "tool_call"; call: ToolCallPart } // a complete tool call, after the reply is done
-  | { type: "done"; message: AssistantMessage; stop: StopReason; model: string; usage?: Usage; detail?: string };
+  // `thinking` is the model's reasoning, where the provider gives it: a summary from Claude,
+  // the whole of it from open reasoning models. It isn't part of the message, so it isn't sent back.
+  | { type: "done"; message: AssistantMessage; stop: StopReason; model: string; usage?: Usage; detail?: string; thinking?: string };
 
 export type ModelInfo = { id: string; name?: string };
 

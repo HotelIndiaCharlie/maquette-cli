@@ -155,11 +155,13 @@ async function serve() {
     const server = await startServer({ port, version, cli, engine }).catch((e) => fail(`  ${e.message}`));
     const root = server.root;
     let stopping = false;
+    let tracing;
     const stop = async (code = 0) => {
         if (stopping)
             process.exit(1);
         stopping = true;
         console.log("\n  Stopping DesignCraft.");
+        await tracing?.shutdown();
         await server.stop();
         process.exit(code);
     };
@@ -183,6 +185,7 @@ async function serve() {
             else if (e.type === "engine_log")
                 process.stderr.write(paint(2, e.text.replace(/^(?=.)/gm, "  ")));
         });
+        tracing = await trace(server, undefined, (text, level) => console.log(`  ${level === "warn" ? paint(33, "!") : tick} ${text}`));
         process.on("SIGINT", () => void stop());
         process.on("SIGTERM", () => void stop());
         return;
@@ -190,11 +193,27 @@ async function serve() {
     const { AgentSession } = await import("./agent/session.js");
     const { runApp } = await import("./ui/app.js");
     const session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample });
+    tracing = await trace(server, session, (text, level) => session.notice(text, level));
     process.on("SIGTERM", () => void stop());
     // Clear the screen first, so the title starts at the top; what was there stays in the scrollback.
     process.stdout.write("\x1b[2J\x1b[H");
     await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint });
     await stop();
+}
+// MAQUETTE_TRACE turns on tracing to Phoenix, for development: docs/telemetry.md.
+async function trace(server, session, say) {
+    const value = process.env.MAQUETTE_TRACE;
+    if (!value)
+        return undefined;
+    try {
+        const { startTracing } = await import("./telemetry/index.js");
+        return startTracing({ value, server, session, say, version });
+    }
+    catch (e) {
+        // The screen isn't up yet, so the notice waits a moment.
+        setTimeout(() => say(`MAQUETTE_TRACE is set, but tracing couldn't start: ${e.message}. It needs the dev dependencies, from a clone: npm install.`, "warn"), 500);
+        return undefined;
+    }
 }
 async function request(path, body) {
     try {

@@ -82,7 +82,8 @@ export class AnthropicProvider implements Provider {
       ...(request.tools?.length ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: { type: "object" as const, ...t.inputSchema } })) } : {}),
       // Caches everything up to the last block, so each turn reads the one before from cache.
       cache_control: { type: "ephemeral" as const },
-      ...(modern ? { thinking: { type: "adaptive" as const } } : {}),
+      // Summarised, so the thinking comes back readable: on some models the default leaves it out.
+      ...(modern ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
       ...(modern && effort !== "default" ? { output_config: { effort } } : {}),
       ...(refusalFallback ? { fallbacks: "default" as const } : {}),
       ...(modern && compaction ? { context_management: { edits: [{ type: "compact_20260112" as const }] } } : {}),
@@ -107,8 +108,10 @@ export class AnthropicProvider implements Provider {
       throw this.explain(e);
     }
     const message: AssistantMessage = { role: "assistant", parts: [], native: { provider: "anthropic", content: final.content } };
+    const thinking: string[] = [];
     for (const block of final.content) {
-      if (block.type === "text") message.parts.push({ type: "text", text: block.text });
+      if (block.type === "thinking" && block.thinking) thinking.push(block.thinking);
+      else if (block.type === "text") message.parts.push({ type: "text", text: block.text });
       else if (block.type === "tool_use") {
         const call: ToolCallPart = { type: "tool_call", id: block.id, name: block.name, input: (block.input ?? {}) as Record<string, unknown> };
         message.parts.push(call);
@@ -123,6 +126,7 @@ export class AnthropicProvider implements Provider {
       stop: stops[final.stop_reason ?? ""] ?? "other",
       model: final.model,
       usage: { input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 },
+      ...(thinking.length ? { thinking: thinking.join("\n\n") } : {}),
       ...(final.stop_reason === "refusal" ? { detail: details?.explanation || (details?.category ? `category: ${details.category}` : undefined) } : {}),
     };
   }
