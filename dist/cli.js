@@ -214,7 +214,7 @@ async function serve() {
 // The line it returns goes under the title, so it's clear tracing is on, or why it isn't.
 async function trace(server, session, say) {
     const value = traceFlag ? "1" : process.env.MAQUETTE_TRACE;
-    if (!value)
+    if (!value || /^(0|false|no|off)$/i.test(value.trim()))
         return {};
     let telemetry;
     try {

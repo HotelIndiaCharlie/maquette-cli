@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { catalogue, type Tool } from "../args.ts";
 import type { SystemBlock } from "../providers/types.ts";
 import type { Mode } from "./permissions.ts";
-import { fill, source, template } from "./prompts.ts";
+import { fill, source } from "./prompts.ts";
 
 export type PromptInput = {
   root: string;
@@ -23,9 +23,6 @@ export function projectInstructions(root: string): string | undefined {
   const file = join(root, "MAQUETTE.md");
   return existsSync(file) ? readFileSync(file, "utf8").trim() || undefined : undefined;
 }
-
-// How to weigh MAQUETTE.md, said once in front of it: prompts/project-rule.md.
-export const projectRule = () => template("project-rule").text;
 
 // The project block: the rule, then the file fenced so the person's words are clearly marked.
 export function projectBlock(text: string | undefined): SystemBlock {

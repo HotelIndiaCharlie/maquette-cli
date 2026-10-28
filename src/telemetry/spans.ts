@@ -117,11 +117,13 @@ export class Tracing {
   }
 
   // The engine's lines written between two times, as events on the span that was running then.
+  // Lines from outside the window stay for a later span, such as the turn's; onServer drops
+  // them after a minute.
   attachLogs(span: Span, from: number, to: number) {
     const keep: Log[] = [];
     for (const log of this.logs) {
       if (log.at >= from && log.at <= to) span.addEvent("engine stderr", { text: cap(log.text, 10_000) }, log.at);
-      else if (log.at > to) keep.push(log);
+      else keep.push(log);
     }
     this.logs = keep;
   }

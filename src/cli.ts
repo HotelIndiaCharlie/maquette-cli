@@ -211,7 +211,7 @@ async function serve() {
 // The line it returns goes under the title, so it's clear tracing is on, or why it isn't.
 async function trace(server: ServerHandle, session: AgentSession | undefined, say: (text: string, level: "info" | "warn") => void): Promise<{ tracing?: { shutdown(): Promise<void> }; line?: { ok: boolean; text: string } }> {
   const value = traceFlag ? "1" : process.env.MAQUETTE_TRACE;
-  if (!value) return {};
+  if (!value || /^(0|false|no|off)$/i.test(value.trim())) return {};
   let telemetry: typeof import("./telemetry/index.ts");
   try {
     telemetry = await import("./telemetry/index.ts");

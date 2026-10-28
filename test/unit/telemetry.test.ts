@@ -132,6 +132,16 @@ test("calls from the prompt and from other sessions get a trace of their own, wi
   assert.deepEqual(call.events.map((e) => [e.name, e.attributes?.text]), [["engine stderr", "warning: font fallback"]]);
 });
 
+test("the engine's stderr from before a tool call stays for the turn, not dropped by the call", () => {
+  const { tracing, named } = traced([]);
+  tracing.logs = [{ at: 100, text: "written while the model thought" }, { at: 250, text: "written during the call" }, { at: 500, text: "written after" }];
+  const call = tracing.start("tool render_page", {});
+  tracing.attachLogs(call, 200, 300);
+  call.end(300);
+  assert.deepEqual(named("tool render_page")[0].events.map((e) => e.attributes?.text), ["written during the call"]);
+  assert.deepEqual(tracing.logs.map((l) => l.text), ["written while the model thought", "written after"], "the rest wait for the turn");
+});
+
 test("the endpoint: 1 means Phoenix on its usual port; a URL gets /v1/traces once", () => {
   assert.equal(endpointOf("1"), "http://localhost:6006/v1/traces");
   assert.equal(endpointOf("http://127.0.0.1:4318/"), "http://127.0.0.1:4318/v1/traces");
@@ -162,7 +172,7 @@ test("the conversation flattens the way OpenInference reads it", () => {
 });
 
 // A fake docker: answers from a script and records what was run.
-function fakeDocker(script: { daemon?: "up" | "down" | "missing"; startsDaemon?: boolean; container?: "" | "running" | "exited"; comesUp?: boolean }) {
+function fakeDocker(script: { daemon?: "up" | "down" | "missing"; startsDaemon?: boolean; container?: "" | "running" | "exited"; comesUp?: boolean; psFails?: boolean }) {
   const ran: string[] = [];
   let daemon = script.daemon ?? "up";
   let up = false;
@@ -175,7 +185,7 @@ function fakeDocker(script: { daemon?: "up" | "down" | "missing"; startsDaemon?:
       return { code: 0, out: "" };
     }
     if (args[0] === "info") return daemon === "up" ? { code: 0, out: "29.9.2" } : { code: 1, out: "Cannot connect to the Docker daemon" };
-    if (args[0] === "ps") return { code: 0, out: script.container ?? "" };
+    if (args[0] === "ps") return script.psFails ? { code: 1, out: "permission denied while trying to connect to the Docker daemon socket" } : { code: 0, out: script.container ?? "" };
     if (args[0] === "run" || args[0] === "start") {
       up = script.comesUp ?? true;
       return { code: 0, out: "" };
@@ -211,6 +221,12 @@ test("--trace says why tracing is off when Phoenix can't be started", async () =
   await assert.rejects(ensurePhoenix(fakeDocker({ daemon: "missing" }).options), /Docker isn't installed/);
   await assert.rejects(ensurePhoenix({ ...fakeDocker({ daemon: "down", startsDaemon: false }).options, platform: "linux" }), /couldn't be started \(Unit docker.service not found\.\)/);
   await assert.rejects(ensurePhoenix(fakeDocker({ comesUp: false }).options), /nothing answers on http:\/\/localhost:6006/);
+  const failing = fakeDocker({ psFails: true });
+  await assert.rejects(ensurePhoenix(failing.options), /couldn't list its containers: permission denied/);
+  assert.ok(!failing.ran.some((r) => r.startsWith("docker start") || r.startsWith("docker run")), "a failed docker ps starts nothing");
+  const windows = fakeDocker({ daemon: "down" });
+  await assert.rejects(ensurePhoenix({ ...windows.options, platform: "win32" }), /Start Docker Desktop, then run again/);
+  assert.ok(!windows.ran.some((r) => r.startsWith("systemctl") || r.startsWith("open")));
 });
 
 test("the line under the title says tracing is on, or why it's off", () => {

@@ -54,13 +54,16 @@ export async function ensurePhoenix(options: EnsureOptions): Promise<string> {
   if (docker.missing) throw new Error("Docker isn't installed. Install Docker Desktop, or start Phoenix yourself: docs/telemetry.md");
   if (docker.code !== 0) {
     say("Starting Docker…");
+    if (platform !== "darwin" && platform !== "linux") throw new Error("Docker isn't running. Start Docker Desktop, then run again.");
     const start = platform === "darwin" ? await exec("open", ["-a", "Docker"]) : await exec("systemctl", ["start", "docker"]);
     if (start.code !== 0) throw new Error(`Docker isn't running, and it couldn't be started (${start.out.split("\n")[0] || "no reason given"}). Start it, then run again.`);
     if (!(await until(async () => (await exec("docker", ["info", "--format", "{{.ServerVersion}}"])).code === 0, 120))) throw new Error("Docker was started but didn't come up within two minutes. Run again once it's up.");
     started = "Docker started, ";
   }
 
-  const state = (await exec("docker", ["ps", "-a", "--filter", `name=^${container}$`, "--format", "{{.State}}"])).out;
+  const ps = await exec("docker", ["ps", "-a", "--filter", `name=^${container}$`, "--format", "{{.State}}"]);
+  if (ps.code !== 0) throw new Error(`Docker couldn't list its containers: ${ps.out.split("\n")[0] || "no reason given"}`);
+  const state = ps.out;
   if (!state) {
     say(`Starting Phoenix in Docker; the first time downloads ${image}…`);
     const made = await exec("docker", ["run", "-d", "--name", container, "-p", "127.0.0.1:6006:6006", "-v", `${container}:/mnt/data`, "-e", "PHOENIX_WORKING_DIR=/mnt/data", image], 900_000);

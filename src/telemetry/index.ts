@@ -34,8 +34,8 @@ export type TracingOptions = {
 // edits not yet committed. Undefined outside a clone.
 export function gitCommit(repo = fileURLToPath(new URL("../..", import.meta.url))): string | undefined {
   try {
-    const commit = execFileSync("git", ["-C", repo, "rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const changed = execFileSync("git", ["-C", repo, "status", "--porcelain", "--", "prompts", "src"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const commit = execFileSync("git", ["-C", repo, "rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000 }).trim();
+    const changed = execFileSync("git", ["-C", repo, "status", "--porcelain", "--", "prompts", "src"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000 }).trim();
     return changed ? `${commit}+changes` : commit;
   } catch {
     return undefined;

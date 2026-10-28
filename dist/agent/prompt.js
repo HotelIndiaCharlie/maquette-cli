@@ -6,13 +6,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { catalogue } from "../args.js";
-import { fill, source, template } from "./prompts.js";
+import { fill, source } from "./prompts.js";
 export function projectInstructions(root) {
     const file = join(root, "MAQUETTE.md");
     return existsSync(file) ? readFileSync(file, "utf8").trim() || undefined : undefined;
 }
-// How to weigh MAQUETTE.md, said once in front of it: prompts/project-rule.md.
-export const projectRule = () => template("project-rule").text;
 // The project block: the rule, then the file fenced so the person's words are clearly marked.
 export function projectBlock(text) {
     if (!text)

@@ -157,3 +157,29 @@ test("config edit creates the file, writes the defaults beside it, opens the edi
   assert.match(again.stdout, /^Opening ~\/.maquette\/settings.json\./);
   assert.equal(readFileSync(`${user}.before`, "utf8"), '{"model": "claude-sonnet-5-5"}');
 });
+
+// Starts the server alone with the stub engine and gives back what it printed by the time the
+// list under the title is done, then stops it.
+async function startLines(env: Record<string, string>): Promise<string> {
+  const cwd = mkdtempSync(join(tmpdir(), "maquette-trace-"));
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(MAQUETTE_|OPENAI_|ANTHROPIC_|DESIGNCRAFT_)/.test(k)));
+  const engine = fileURLToPath(new URL("../stub-engine.ts", import.meta.url));
+  const child = spawn(process.execPath, [cli, "--port", String(await closedPort())], { cwd, env: { ...clean, HOME: cwd, NO_COLOR: "1", MAQUETTE_ENGINE: engine, ...env } });
+  child.stdin.end();
+  let out = "";
+  await new Promise<void>((done) => {
+    child.stdout.on("data", (d) => {
+      out += d;
+      if (out.includes("From another terminal")) done();
+    });
+    child.on("close", () => done());
+  });
+  child.kill();
+  return out;
+}
+
+test("MAQUETTE_TRACE=0, false or off leaves tracing off; a URL turns it on and says where", async () => {
+  for (const value of ["0", "false", "off"]) assert.ok(!(await startLines({ MAQUETTE_TRACE: value })).includes("Tracing"), `MAQUETTE_TRACE=${value}`);
+  const port = await closedPort();
+  assert.match(await startLines({ MAQUETTE_TRACE: `http://127.0.0.1:${port}` }), new RegExp(`✓ Tracing to http://127\\.0\\.0\\.1:${port}, project maquette`));
+});
