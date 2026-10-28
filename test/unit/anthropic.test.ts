@@ -16,7 +16,7 @@ const reply = (model: string, blocks: { start: object; deltas: object[] }[], sto
   { type: "message_stop" },
 ];
 
-const thinking = { start: { type: "thinking", thinking: "", signature: "" }, deltas: [{ type: "signature_delta", signature: "sig123" }] };
+const thinking = { start: { type: "thinking", thinking: "", signature: "" }, deltas: [{ type: "thinking_delta", thinking: "Page one means page 0." }, { type: "signature_delta", signature: "sig123" }] };
 const text = (...parts: string[]) => ({ start: { type: "text", text: "" }, deltas: parts.map((t) => ({ type: "text_delta", text: t })) });
 const toolUse = { start: { type: "tool_use", id: "toolu_01", name: "render_page", input: {} }, deltas: [{ type: "input_json_delta", partial_json: '{"pa' }, { type: "input_json_delta", partial_json: 'ge": 0}' }] };
 
@@ -39,7 +39,7 @@ test("streams a turn with adaptive thinking, effort, caching, compaction and fal
     { type: "text", text: "In /tmp.", cache_control: { type: "ephemeral" } },
     { type: "text", text: "No memory yet." },
   ]);
-  assert.deepEqual(req.body.thinking, { type: "adaptive" });
+  assert.deepEqual(req.body.thinking, { type: "adaptive", display: "summarized" });
   assert.deepEqual(req.body.output_config, { effort: "high" });
   assert.deepEqual(req.body.cache_control, { type: "ephemeral" });
   assert.equal(req.body.fallbacks, "default");
@@ -56,12 +56,13 @@ test("streams a turn with adaptive thinking, effort, caching, compaction and fal
   assert.equal(done.model, "claude-opus-5-5");
   assert.deepEqual(done.usage, { input: 900, output: 42, cacheRead: 4000, cacheWrite: 0 });
   assert.deepEqual(done.message.parts, [{ type: "text", text: "Rendering page one." }, call]);
+  assert.equal(done.thinking, "Page one means page 0.", "the summarised thinking comes with the reply, not in it");
 
   // The next turn sends the reply back block for block, thinking signature included.
   await drain(provider.chat({ system: [{ name: "core", text: "You are Maquette." }], messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }, done.message, { role: "user", parts: [{ type: "tool_result", id: "toolu_01", name: "render_page", content: [{ type: "text", text: "Rendered." }, { type: "image", mediaType: "image/png", data: "iVBORw0KGgo=" }] }] }] }));
   const [, second] = server.seen;
   assert.deepEqual(second.body.messages[1].content, [
-    { type: "thinking", thinking: "", signature: "sig123" },
+    { type: "thinking", thinking: "Page one means page 0.", signature: "sig123" },
     { type: "text", text: "Rendering page one." },
     { type: "tool_use", id: "toolu_01", name: "render_page", input: { page: 0 } },
   ]);

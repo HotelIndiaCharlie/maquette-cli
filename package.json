@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "examples",
+    "prompts",
     "skills",
     "designcraft-pin.json"
   ],
@@ -41,6 +42,10 @@
     "react": "19.3.1"
   },
   "devDependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.222.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-trace-base": "2.11.0",
     "@types/d3-format": "3.0.4",
     "@types/d3-scale": "4.0.9",
     "@types/d3-time": "3.0.4",

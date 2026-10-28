@@ -204,7 +204,7 @@ maquette config set model qwen3:14b
 maquette ask "what can you do here?"
 ```
 
-The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. A model that can't call tools still works at the prompt, through the `maquette call` text protocol described under [The prompt](#the-prompt), just less smoothly.
+The server address is `providers.openai-compatible.baseUrl` (default `http://localhost:11434/v1`, Ollama's), or `OPENAI_BASE_URL`. A server that needs a key reads it from `OPENAI_API_KEY`. For a model that can't see images, set `providers.openai-compatible.vision` to `false`, and images are replaced by a note saying they were left out. A reasoning model's thinking, whether the server sends it in a field of its own or between `<think>` tags, is kept out of the answer. A model that can't call tools still works at the prompt, through the `maquette call` text protocol described under [The prompt](#the-prompt), just less smoothly.
 
 ## How it behaves
 
@@ -268,7 +268,7 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | --- | --- |
 | [`src/cli.ts`](src/cli.ts) | `maquette` and its commands: `call`, `tools`, `example`, `config`, `ask`, `models`, `install-designcraft` |
 | [`src/server.ts`](src/server.ts) | The running Maquette: the engine as a child process, the queue that runs calls one at a time, the HTTP server |
-| [`src/agent/`](src/agent/) | The agent loop ([`session.ts`](src/agent/session.ts)), routing of typed lines, permissions, the system prompt ([`core.ts`](src/agent/core.ts) is its fixed core, [`prompt.ts`](src/agent/prompt.ts) adds the environment and `MAQUETTE.md`), `!` commands and costs. It emits events and knows nothing about the screen. |
+| [`src/agent/`](src/agent/) | The agent loop ([`session.ts`](src/agent/session.ts)), routing of typed lines, permissions, the system prompt ([`prompt.ts`](src/agent/prompt.ts) builds its blocks from `prompts/`, adding the session's details and `MAQUETTE.md`), `!` commands and costs. It emits events and knows nothing about the screen. |
 | [`src/ui/`](src/ui/) | The Ink screen: transcript, streaming answer with Markdown, tool lines, permission prompt, input box, footer |
 | [`src/args.ts`](src/args.ts) | How a typed line becomes a tool's arguments, shared by the prompt, `maquette call` and the text protocol |
 | [`src/engine.ts`](src/engine.ts) | The engine, an MCP server on stdio: DesignCraft's tools passed through, plus each tool module's |
@@ -277,6 +277,7 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | [`src/settings.ts`](src/settings.ts) | The settings: their keys, types and defaults, the four layers, and writing one key |
 | [`src/providers/`](src/providers/) | Model providers behind one interface ([`types.ts`](src/providers/types.ts)): [`anthropic.ts`](src/providers/anthropic.ts), [`openai-compatible.ts`](src/providers/openai-compatible.ts), and [`fake.ts`](src/providers/fake.ts) for tests |
 | [`src/tools/`](src/tools/) | Tool modules: [`chart/`](src/tools/chart/), [`survey/`](src/tools/survey/) (`document_survey`) and [`memory/`](src/tools/memory/) (`memory_write`, `memory_add`) |
+| [`prompts/`](prompts/) | What the model is told, as Markdown: [`core.md`](prompts/core.md) is the fixed core of the system prompt, the rest the session's and project's blocks and `maquette ask`'s prompt. `{{name}}` is filled in by the code and `{{> name}}` takes in another file. Edit them here and restart Maquette; traces record which version each reply came from |
 | [`skills/`](skills/) | Skills Maquette ships; [`init/SKILL.md`](skills/init/SKILL.md) is what `/init` tells the model |
 | [`examples/`](examples/) | The example report (an A4 annual report for a fictional cooperative, with five labelled chart slots), its CSVs and their `-updated` versions, and five chart specs |
 | [`designcraft-pin.json`](designcraft-pin.json) | The DesignCraft version Maquette is tested with, and its CLI's download and checksum |
@@ -310,6 +311,8 @@ echo "alias mqtb='MAQUETTE_PORT=8788 node ~/maquette-cli-test/src/cli.ts'" >> ~/
 ```
 
 Before testing a ticket: `cd ~/maquette-cli-test && git fetch && git checkout <branch> && git pull && npm install`. Then try it in a scratch folder, never inside either checkout: `mkdir -p ~/maquette-try && cd ~/maquette-try && mqtb`. `maquette` (port 8787) and `mqtb` (port 8788) can run at the same time in two folders. `mqtb call …` and `mqtb tools` reach the branch's server, since they read the same `MAQUETTE_PORT`. Both read `~/.maquette/settings.json`; a key only the branch knows is ignored by main with a warning.
+
+To see what the agent does on each turn (every request to the model with its thinking, every tool call with where its time went, and why anything failed), start Maquette with `--trace` (`npm run dev -- --trace`, or `mqtb --trace`): it starts [Phoenix](https://github.com/Arize-ai/phoenix) in Docker, and Docker itself if need be, and traces to it on http://localhost:6006. [`docs/telemetry.md`](docs/telemetry.md) has the details.
 
 `dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 

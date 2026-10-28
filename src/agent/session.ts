@@ -13,7 +13,7 @@ import { type ImagePart, type Message, type Provider, ProviderError, type System
 import type { Reply, Source } from "../server.ts";
 import { providerNames, type Settings, write } from "../settings.ts";
 import { dollars, price } from "./cost.ts";
-import type { AgentEvent, Choice, PermissionAnswer, Status } from "./events.ts";
+import type { AgentEvent, Choice, Failure, PermissionAnswer, Status } from "./events.ts";
 import { decide, type Mode, modeHelp, modes } from "./permissions.ts";
 import { projectInstructions, systemPrompt } from "./prompt.ts";
 import { type Route, route, slashCommands } from "./route.ts";
@@ -376,12 +376,17 @@ export class AgentSession {
     let interrupted = false;
     let stop;
     let usage: Usage | undefined;
+    let step = 0;
     try {
       for (;;) {
         let done;
         let soFar = "";
+        const request = { system: this.system(), messages: this.history, tools: this.textProtocol ? undefined : this.toolSpecs() };
+        const started = Date.now();
+        const end = (fields: { failure?: Failure; error?: string } = {}) => this.emit({ type: "step_end", step, ms: Date.now() - started, ...fields });
+        this.emit({ type: "step_start", step: ++step, provider: this.provider.name, model: this.provider.model, request });
         try {
-          for await (const event of this.provider.chat({ system: this.system(), messages: this.history, tools: this.textProtocol ? undefined : this.toolSpecs(), signal: this.#abort.signal })) {
+          for await (const event of this.provider.chat({ ...request, signal: this.#abort.signal })) {
             if (event.type === "text") {
               soFar += event.text;
               this.emit(event);
@@ -392,19 +397,27 @@ export class AgentSession {
         } catch (e) {
           if (this.#interrupted || this.#abort.signal.aborted) {
             if (soFar) this.history.push({ role: "assistant", parts: [{ type: "text", text: soFar }] });
+            end({ failure: "user.interrupted" });
             interrupted = true;
             break;
           }
           if (!this.textProtocol && e instanceof ProviderError && /can't call tools/.test(e.message)) {
+            end({ failure: "fallback.text_protocol", error: e.message });
             this.textProtocol = true;
             this.notice(`${this.provider.model} can't call tools, so it will write \`maquette call\` lines instead, and Maquette asks before running each.`, "warn");
             this.sendStatus();
             continue;
           }
+          end({ failure: "provider.error", error: (e as Error).message });
           this.notice((e as Error).message, "error");
           break;
         }
-        if (!done) break;
+        if (!done) {
+          end({ failure: "provider.no_reply" });
+          break;
+        }
+        const failure = done.stop === "refusal" ? "model.refusal" : done.stop === "max_tokens" ? "model.max_tokens" : undefined;
+        this.emit({ type: "step_end", step, ms: Date.now() - started, message: done.message, stop: done.stop, model: done.model, usage: done.usage, thinking: done.thinking, ...(failure ? { failure, error: done.detail } : {}) });
         this.history.push(done.message);
         this.account(done.model, done.usage);
         this.sendStatus();
@@ -465,42 +478,50 @@ export class AgentSession {
     const results: ToolResultPart[] = [];
     for (const call of calls) {
       if (this.textProtocol) this.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input, source: "model" });
-      const fail = (text: string) => {
-        this.emit({ type: "tool_result", id: call.id, name: call.name, ok: false, text, images: [], ms: 0 });
+      let permission: PermissionAnswer | "allowed" | undefined;
+      let waited = 0;
+      const fail = (text: string, failure: Failure) => {
+        this.emit({ type: "tool_result", id: call.id, name: call.name, ok: false, text, images: [], ms: 0, failure, timing: { permission: waited, queue: 0, run: 0 }, permission });
         results.push({ type: "tool_result", id: call.id, name: call.name, content: [{ type: "text", text }], isError: true });
       };
       if (this.#interrupted) {
-        fail("Interrupted by the person before this ran.");
+        fail("Interrupted by the person before this ran.", "user.interrupted");
         continue;
       }
       if (call.error) {
-        fail(call.error);
+        fail(call.error, "model.bad_args");
         continue;
       }
       const tool = this.server.byName.get(call.name);
       if (!tool) {
-        fail(`There's no tool "${call.name}".`);
+        fail(`There's no tool "${call.name}".`, "model.unknown_tool");
         continue;
       }
       const decision = this.textProtocol ? "ask" : decide(this.mode, tool, this.allowed);
       if (decision === "deny") {
-        fail("Plan mode: this call would change something, so it wasn't run. Describe it in your plan instead.");
+        fail("Plan mode: this call would change something, so it wasn't run. Describe it in your plan instead.", "policy.plan_denied");
         continue;
       }
+      permission = "allowed";
       if (decision === "ask") {
-        const answer = await new Promise<PermissionAnswer>((reply) => {
+        const asked = Date.now();
+        permission = await new Promise<PermissionAnswer>((reply) => {
           this.#pendingAnswer = reply;
           this.emit({ type: "ask_permission", id: call.id, name: call.name, input: call.input, reply });
         });
+        waited = Date.now() - asked;
         this.#pendingAnswer = undefined;
-        if (answer === "a") this.allowed.add(call.name);
-        if (answer === "n") {
-          fail(this.#interrupted ? "Interrupted by the person before this ran." : "The person declined this call. Ask what they'd like instead, or go on without it.");
+        if (permission === "a") this.allowed.add(call.name);
+        if (permission === "n") {
+          if (this.#interrupted) fail("Interrupted by the person before this ran.", "user.interrupted");
+          else fail("The person declined this call. Ask what they'd like instead, or go on without it.", "user.declined");
           continue;
         }
       }
+      const queued = Date.now();
       const reply = await this.server.enqueue(call.name, call.input, "model");
-      this.emit({ type: "tool_result", id: call.id, name: call.name, ok: reply.ok, text: reply.text, images: reply.images, ms: reply.ms });
+      const timing = { permission: waited, queue: Math.max(0, Date.now() - queued - reply.ms), run: reply.ms };
+      this.emit({ type: "tool_result", id: call.id, name: call.name, ok: reply.ok, text: reply.text, images: reply.images, ms: reply.ms, timing, permission, ...(reply.ok ? {} : { failure: "tool.error" as const }) });
       this.warnOnOpen(call.name, reply);
       const content: (TextPart | ImagePart)[] = [{ type: "text", text: `${reply.text}${reply.images.map((p) => `\nimage: ${p}`).join("")}` || "(no output)" }];
       for (const path of reply.images) {

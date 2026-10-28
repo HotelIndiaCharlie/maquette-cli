@@ -23,7 +23,7 @@ export class FakeProvider {
             yield { type: "tool_call", call };
         }
         const stop = turn.stop ?? (turn.calls?.length ? "tool_use" : "end");
-        yield { type: "done", message, stop, model: this.model, usage: { input: 0, output: 0 } };
+        yield { type: "done", message, stop, model: this.model, usage: { input: 0, output: 0 }, ...(turn.thinking ? { thinking: turn.thinking } : {}) };
     }
     async models() {
         return [{ id: "fake" }];

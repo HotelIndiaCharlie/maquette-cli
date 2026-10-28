@@ -10,7 +10,8 @@ import { InputBox } from "./input.ts";
 import { Footer, Notices, PermissionPrompt, Picker, type Segment, shortcuts, Turn } from "./parts.ts";
 import { type Item, type ItemBody, type ToolItem, Transcript } from "./transcript.ts";
 
-export type Info = { version: string; engineName: string; toolCount: number; port: number; images: string; hint?: string };
+// `trace` is the tracing line, when --trace or MAQUETTE_TRACE asked for it: on, or why it's off.
+export type Info = { version: string; engineName: string; toolCount: number; port: number; images: string; hint?: string; trace?: { ok: boolean; text: string } };
 type Ask = { id: string; name: string; input: Record<string, unknown>; reply: (a: PermissionAnswer) => void };
 type Choosing = { title: string; options: Choice[]; index: number; reply: (id: string | null) => void };
 type ServerLike = Pick<ServerHandle, "root" | "byName" | "on">;
@@ -24,6 +25,7 @@ export function startLines(info: Info, root: string, status: Status): string[] {
     `  ${tick} Listening on ${bold(`http://127.0.0.1:${info.port}`)} for other sessions`,
     `  ${tick} Renders go to ${info.images}/`,
     `  ${tick} Model ${bold(status.model)} from ${status.provider}${status.effort ? `, effort ${status.effort}` : ""}, permission mode ${bold(status.mode)}`,
+    ...(info.trace ? [`  ${info.trace.ok ? tick : "\x1b[33m!\x1b[0m"} ${info.trace.text}`] : []),
     "",
     `  Type what you want done, or a tool and its flags. ${bold("help")} shows how, ${bold("/help")} the slash commands.`,
     ...(info.hint ? [`  ${info.hint}`] : []),

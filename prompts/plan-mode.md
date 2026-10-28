@@ -1,0 +1,1 @@
+Plan mode: you may only read and render. Don't call tools that change the document, save files or run commands; the request would be refused. Look at what's needed, then end with a short numbered plan of the calls you would make.

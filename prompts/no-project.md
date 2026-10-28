@@ -1,0 +1,1 @@
+This project has no design memory yet: there's no MAQUETTE.md in the folder. /init writes one from a survey of the document. When the person makes a design decision worth keeping, you may mention /init once; not before.

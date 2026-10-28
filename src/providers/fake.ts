@@ -3,7 +3,7 @@
 // is kept in `requests` so a test can check what the model was sent.
 import type { AssistantMessage, ChatEvent, ChatRequest, ModelInfo, Provider, StopReason } from "./types.ts";
 
-export type FakeTurn = { text?: string; calls?: { name: string; input?: Record<string, unknown> }[]; stop?: StopReason };
+export type FakeTurn = { text?: string; thinking?: string; calls?: { name: string; input?: Record<string, unknown> }[]; stop?: StopReason };
 
 export class FakeProvider implements Provider {
   readonly name = "fake";
@@ -31,7 +31,7 @@ export class FakeProvider implements Provider {
       yield { type: "tool_call", call };
     }
     const stop = turn.stop ?? (turn.calls?.length ? "tool_use" : "end");
-    yield { type: "done", message, stop, model: this.model, usage: { input: 0, output: 0 } };
+    yield { type: "done", message, stop, model: this.model, usage: { input: 0, output: 0 }, ...(turn.thinking ? { thinking: turn.thinking } : {}) };
   }
 
   async models(): Promise<ModelInfo[]> {

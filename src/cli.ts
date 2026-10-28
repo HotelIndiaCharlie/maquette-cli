@@ -12,13 +12,14 @@ import { dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import type { AgentSession } from "./agent/session.ts";
 import { catalogue, clock, describe, gist, paint, shortPath, tilde, toArgs, type Tool } from "./args.ts";
 import { bannerText } from "./banner.ts";
 import { imageType } from "./images.ts";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.ts";
-import { projectRule } from "./agent/prompt.ts";
+import { fill } from "./agent/prompts.ts";
 import { createProvider, defaultModels, type ImagePart, type TextPart } from "./providers/index.ts";
-import { type Reply, type ServerEvent, startServer } from "./server.ts";
+import { type Reply, type ServerEvent, type ServerHandle, startServer } from "./server.ts";
 import { defaults, ensure, type Loaded, load, parse, schema, SettingsError, write } from "./settings.ts";
 
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,11 +39,13 @@ A tool's arguments are --flags (render_page --page 0); its required ones can go 
 flag (open_document example/annual-report.designcraft). @file reads a value from a JSON file,
 and a single {…} or @file gives all the arguments. Paths are relative to the folder Maquette
 runs in, and DesignCraft reads and writes only inside it.
-Options: --port <n> (default 8787) for every command; --json for call, tools and models (the
-raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another DesignCraft CLI; --from <zip>
-to install the CLI from a downloaded copy of its release zip; --provider <name> and --model <id>
-for ask and models; --image <file> (repeatable) to show the model an image with ask; --project
-for config set, unset and edit, to use .maquette/settings.json here instead of ~/.maquette.`;
+Options: --port <n> (default 8787) for every command; --trace with maquette alone, to start
+Phoenix (in Docker, starting Docker if need be) and trace every turn and call to it; --json for
+call, tools and models (the raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another
+DesignCraft CLI; --from <zip> to install the CLI from a downloaded copy of its release zip;
+--provider <name> and --model <id> for ask and models; --image <file> (repeatable) to show the
+model an image with ask; --project for config set, unset and edit, to use .maquette/settings.json
+here instead of ~/.maquette.`;
 
 function fail(message: string): never {
   console.error(message);
@@ -62,6 +65,7 @@ const portFlag = option("port", true);
 const asJson = option("json") !== undefined;
 const designcraftFlag = option("designcraft", true);
 const fromZip = option("from", true);
+const traceFlag = option("trace") !== undefined;
 const wantsHelp = option("help") !== undefined || argv.includes("-h");
 const wantsVersion = option("version") !== undefined || argv.includes("-v");
 const [command, ...rest] = argv;
@@ -154,10 +158,12 @@ async function serve() {
   const server = await startServer({ port, version, cli, engine }).catch((e: Error) => fail(`  ${e.message}`));
   const root = server.root;
   let stopping = false;
+  let tracing: { shutdown(): Promise<void> } | undefined;
   const stop = async (code = 0) => {
     if (stopping) process.exit(1);
     stopping = true;
     console.log("\n  Stopping DesignCraft.");
+    await tracing?.shutdown();
     await server.stop();
     process.exit(code);
   };
@@ -169,10 +175,14 @@ async function serve() {
 
   if (!interactive) {
     const tick = paint(32, "✓");
+    const traced = await trace(server, undefined, (text, level) => console.log(`  ${level === "warn" ? paint(33, "!") : tick} ${text}`));
+    tracing = traced.tracing;
     console.log(`\n  ${tick} ${engineName}, headless, with Maquette's tools (${server.tools.length} tools)`);
     console.log(`  ${tick} Working in ${paint(1, tilde(root))}: DesignCraft reads and writes only here`);
     console.log(`  ${tick} Listening on ${paint(1, `http://127.0.0.1:${port}`)} for other sessions`);
-    console.log(`  ${tick} Renders go to ${relative(root, server.images)}/\n`);
+    console.log(`  ${tick} Renders go to ${relative(root, server.images)}/`);
+    if (traced.line) console.log(`  ${traced.line.ok ? tick : paint(33, "!")} ${traced.line.text}`);
+    console.log();
     console.log(`  From another terminal: ${paint(36, "maquette tools")}, then ${paint(36, "maquette call <tool> --flag value")}`);
     console.log(`  ${paint(2, "Ctrl-C stops it; unsaved changes to the document are lost.")}\n`);
     server.on((e) => {
@@ -187,11 +197,37 @@ async function serve() {
   const { AgentSession } = await import("./agent/session.ts");
   const { runApp } = await import("./ui/app.ts");
   const session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample });
+  const traced = await trace(server, session, (text, level) => session.notice(text, level));
+  tracing = traced.tracing;
   process.on("SIGTERM", () => void stop());
   // Clear the screen first, so the title starts at the top; what was there stays in the scrollback.
   process.stdout.write("\x1b[2J\x1b[H");
-  await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint });
+  await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint, trace: traced.line });
   await stop();
+}
+
+// --trace starts Phoenix on localhost:6006 (and Docker, if need be) and traces to it;
+// MAQUETTE_TRACE traces to a collector that's already running. For development: docs/telemetry.md.
+// The line it returns goes under the title, so it's clear tracing is on, or why it isn't.
+async function trace(server: ServerHandle, session: AgentSession | undefined, say: (text: string, level: "info" | "warn") => void): Promise<{ tracing?: { shutdown(): Promise<void> }; line?: { ok: boolean; text: string } }> {
+  const value = traceFlag ? "1" : process.env.MAQUETTE_TRACE;
+  if (!value || /^(0|false|no|off)$/i.test(value.trim())) return {};
+  let telemetry: typeof import("./telemetry/index.ts");
+  try {
+    telemetry = await import("./telemetry/index.ts");
+  } catch (e) {
+    return { line: { ok: false, text: `Tracing is off: it needs the dev dependencies, so run from a clone after npm install (${(e as Error).message})` } };
+  }
+  let how = "";
+  if (traceFlag) {
+    try {
+      how = await telemetry.ensurePhoenix({ say: (text) => console.log(`  ${paint(2, text)}`) });
+    } catch (e) {
+      return { line: { ok: false, text: `Tracing is off: ${(e as Error).message}` } };
+    }
+  }
+  const tracing = telemetry.startTracing({ value, server, session, say, version });
+  return { tracing, line: { ok: true, text: `Tracing to ${paint(1, tracing.url.replace(/\/v1\/traces$/, ""))}${how ? ` (${how})` : ""}, project maquette` } };
 }
 
 async function request(path: string, body?: unknown): Promise<any> {
@@ -344,16 +380,13 @@ async function listModels() {
   console.log(`\n${provider.model ? `Using ${paint(1, provider.model)}. ` : "No model is set. "}Change it with \`maquette config set model <id>\`.`);
 }
 
-// What the model is told in `maquette ask`: where it is, and Maquette's tools when it's running.
+// What the model is told in `maquette ask`, from prompts/ask*.md: where it is, and Maquette's
+// tools when it's running.
 function askPrompt(running?: { root: string; instructions: string; project?: string | null; tools: Tool[] }): string {
-  return [
-    "You answer inside Maquette, a terminal program. Maquette runs DesignCraft, a page-layout program, headless, with one shared document that the person and other terminals and sessions send tool calls to.",
-    "This is `maquette ask`: one question, one answer, and you can't call tools yourself here. When the question needs tools, give the `maquette call <tool> --flag value` lines that would do it, each on its own line, for the person to run. Required arguments can go without their flag, objects take JSON or @file, and `maquette tools <tool>` shows a tool's flags. At the `maquette ›` prompt itself, the person can instead just say what they want and the model there calls the tools.",
-    "Write for a terminal: plain sentences and short lists, commands on their own lines, no headings or tables.",
-    running
-      ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}${running.project ? `\n\nThe project's MAQUETTE.md. ${projectRule}\n\n${running.project}` : ""}\n\nIts tools:\n${catalogue(running.tools)}`
-      : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
-  ].join("\n\n");
+  const where = running
+    ? fill("ask-running", { root: running.root, instructions: running.instructions, project: running.project ? `\n\n${fill("ask-project", { memory: running.project })}` : "", tools: catalogue(running.tools) })
+    : fill("ask-not-running");
+  return `${fill("ask")}\n\n${where}`;
 }
 
 async function ask(tokens: string[]) {

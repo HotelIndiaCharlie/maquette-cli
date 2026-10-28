@@ -20,13 +20,17 @@ export type ToolSpec = { name: string; description?: string; inputSchema: Record
 // The instructions, as named blocks in order: Maquette's core, the session's environment, the
 // project's MAQUETTE.md. A block marked `cache` is a prompt-cache breakpoint where the provider
 // has them, so the stable blocks before a change are read from cache.
-export type SystemBlock = { name: string; text: string; cache?: boolean };
+// Where a block's text came from: the prompts/*.md it was filled from, one version for them
+// all, and the variables it was filled with. Providers ignore it; traces show it.
+export type PromptSource = { names: string[]; version: string; variables: Record<string, string> };
+export type SystemBlock = { name: string; text: string; cache?: boolean; source?: PromptSource };
 export type ChatRequest = { system: SystemBlock[]; messages: Message[]; tools?: ToolSpec[]; signal?: AbortSignal };
 
 // The blocks as one string, for providers and tests that want one.
 export const systemText = (blocks: SystemBlock[]) => blocks.map((b) => b.text).filter(Boolean).join("\n\n");
 
-export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+// `reasoning` is the part of `output` the model spent thinking, when the server says.
+export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number };
 // end: the model finished; tool_use: it wants its tool calls run; max_tokens: it was cut off;
 // refusal: it declined.
 export type StopReason = "end" | "tool_use" | "max_tokens" | "refusal" | "other";
@@ -35,7 +39,9 @@ export type ChatEvent =
   | { type: "text"; text: string } // more of the reply, as it's written
   | { type: "notice"; text: string } // something the person should know, such as a fallback model taking over
   | { type: "tool_call"; call: ToolCallPart } // a complete tool call, after the reply is done
-  | { type: "done"; message: AssistantMessage; stop: StopReason; model: string; usage?: Usage; detail?: string };
+  // `thinking` is the model's reasoning, where the provider gives it: a summary from Claude,
+  // the whole of it from open reasoning models. It isn't part of the message, so it isn't sent back.
+  | { type: "done"; message: AssistantMessage; stop: StopReason; model: string; usage?: Usage; detail?: string; thinking?: string };
 
 export type ModelInfo = { id: string; name?: string };
 
