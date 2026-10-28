@@ -2,7 +2,9 @@
 // collector that takes OTLP over HTTP) while developing Maquette's tools. See docs/telemetry.md.
 // The OpenTelemetry packages are dev dependencies, so this works from a clone, not from a
 // global install; to take tracing out, delete this folder and the lines in cli.ts that load it.
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BasicTracerProvider, BatchSpanProcessor, type ReadableSpan, type SpanExporter } from "@opentelemetry/sdk-trace-base";
@@ -28,8 +30,21 @@ export type TracingOptions = {
   version: string;
 };
 
+// The commit this run's code and prompts are from, with "+changes" when prompts/ or src/ have
+// edits not yet committed. Undefined outside a clone.
+export function gitCommit(repo = fileURLToPath(new URL("../..", import.meta.url))): string | undefined {
+  try {
+    const commit = execFileSync("git", ["-C", repo, "rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const changed = execFileSync("git", ["-C", repo, "status", "--porcelain", "--", "prompts", "src"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return changed ? `${commit}+changes` : commit;
+  } catch {
+    return undefined;
+  }
+}
+
 export function startTracing(options: TracingOptions): { url: string; shutdown(): Promise<void> } {
   const url = endpointOf(options.value);
+  const commit = gitCommit();
   const exporter = new OTLPTraceExporter({ url });
   // Says once when the collector stops taking spans, since a missing one fails silently.
   let told = false;
@@ -53,7 +68,7 @@ export function startTracing(options: TracingOptions): { url: string; shutdown()
     spanLimits: { attributeCountLimit: 100_000, attributeValueLengthLimit: 200_000, eventCountLimit: 1000 },
     spanProcessors: [new BatchSpanProcessor(reporting, { scheduledDelayMillis: 1000 })],
   });
-  const tracing = new Tracing(provider.getTracer("maquette", options.version), randomUUID());
+  const tracing = new Tracing(provider.getTracer("maquette", options.version), randomUUID(), commit ? { "maquette.git.commit": commit } : {});
   const offs = [options.server.on((e) => tracing.onServer(e)), ...(options.session ? [options.session.on((e) => tracing.onAgent(e))] : [])];
   return {
     url,

@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "examples",
+    "prompts",
     "skills",
     "designcraft-pin.json"
   ],

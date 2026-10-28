@@ -20,7 +20,10 @@ export type ToolSpec = { name: string; description?: string; inputSchema: Record
 // The instructions, as named blocks in order: Maquette's core, the session's environment, the
 // project's MAQUETTE.md. A block marked `cache` is a prompt-cache breakpoint where the provider
 // has them, so the stable blocks before a change are read from cache.
-export type SystemBlock = { name: string; text: string; cache?: boolean };
+// Where a block's text came from: the prompts/*.md it was filled from, one version for them
+// all, and the variables it was filled with. Providers ignore it; traces show it.
+export type PromptSource = { names: string[]; version: string; variables: Record<string, string> };
+export type SystemBlock = { name: string; text: string; cache?: boolean; source?: PromptSource };
 export type ChatRequest = { system: SystemBlock[]; messages: Message[]; tools?: ToolSpec[]; signal?: AbortSignal };
 
 // The blocks as one string, for providers and tests that want one.

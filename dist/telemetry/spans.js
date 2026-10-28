@@ -5,6 +5,8 @@
 // HTTP get a trace of their own. Development only: nothing outside src/telemetry/ imports this.
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { price } from "../agent/cost.js";
+import { createHash } from "node:crypto";
+import { template } from "../agent/prompts.js";
 import { systemText } from "../providers/types.js";
 // Long enough for any prompt or tool result Maquette sends; images are never inlined.
 const cap = (s, n = 100_000) => (s.length > n ? `${s.slice(0, n)}… (${s.length - n} more characters)` : s);
@@ -57,6 +59,28 @@ export function messageAttributes(prefix, system, messages) {
     }
     return out;
 }
+// Which prompts/*.md the system prompt was filled from, the OpenInference way so Phoenix shows
+// the template, its variables and a version: one for the whole set, and one per block, so a
+// change to a prompt can be compared with the traces before it. Versions hash the templates,
+// not the filled text, so they don't change with the folder or MAQUETTE.md.
+export function promptAttributes(system) {
+    const blocks = system.filter((b) => b.source);
+    if (!blocks.length)
+        return {};
+    const out = {};
+    const variables = {};
+    for (const b of blocks) {
+        out[`maquette.prompt.${b.name}.version`] = b.source.version;
+        out[`maquette.prompt.${b.name}.files`] = b.source.names.map((n) => `prompts/${n}.md`);
+        // Long values, such as the engine's instructions or MAQUETTE.md, are in the input messages already.
+        for (const [k, v] of Object.entries(b.source.variables))
+            variables[k] = v.length > 200 ? `(${v.length} characters; see the input messages)` : v;
+    }
+    out["llm.prompt_template.version"] = createHash("sha256").update(blocks.map((b) => `${b.name}@${b.source.version}`).join(" ")).digest("hex").slice(0, 8);
+    out["llm.prompt_template.template"] = cap(blocks.map((b) => b.source.names.map((n) => template(n).text).join("\n\n")).join("\n\n"));
+    out["llm.prompt_template.variables"] = json(variables);
+    return out;
+}
 const toolAttributes = (tools = []) => Object.fromEntries(tools.map((t, i) => [`llm.tools.${i}.tool.json_schema`, json({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })]));
 // Failures the person caused aren't the agent's: they're recorded but don't turn a turn red.
 const isAgents = (f) => !f.startsWith("user.");
@@ -67,13 +91,15 @@ export class Tracing {
     logs = [];
     turn;
     step;
-    constructor(tracer, sessionId) {
+    common; // on every span, such as the commit the code and prompts are from
+    constructor(tracer, sessionId, common = {}) {
         this.tracer = tracer;
         this.sessionId = sessionId;
+        this.common = common;
     }
     start(name, attributes, parent, startTime) {
         const ctx = parent ? trace.setSpan(context.active(), parent) : undefined;
-        return this.tracer.startSpan(name, { attributes: { "session.id": this.sessionId, ...attributes }, startTime: startTime ?? clock() }, ctx);
+        return this.tracer.startSpan(name, { attributes: { "session.id": this.sessionId, ...this.common, ...attributes }, startTime: startTime ?? clock() }, ctx);
     }
     fail(span, failure, message) {
         span.setAttribute("maquette.failure", failure);
@@ -128,6 +154,7 @@ export class Tracing {
                         "input.value": json({ messages: request.messages.length, tools: request.tools?.map((t) => t.name) ?? "text protocol" }),
                         "input.mime_type": "application/json",
                         "maquette.system_blocks": request.system.map((b) => b.name),
+                        ...promptAttributes(request.system),
                         ...messageAttributes("llm.input_messages", systemText(request.system), request.messages),
                         ...toolAttributes(request.tools),
                     }, this.turn.span),

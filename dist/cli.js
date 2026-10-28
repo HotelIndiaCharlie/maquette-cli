@@ -16,7 +16,7 @@ import { catalogue, clock, describe, gist, paint, shortPath, tilde, toArgs } fro
 import { bannerText } from "./banner.js";
 import { imageType } from "./images.js";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.js";
-import { projectRule } from "./agent/prompt.js";
+import { fill } from "./agent/prompts.js";
 import { createProvider, defaultModels } from "./providers/index.js";
 import { startServer } from "./server.js";
 import { defaults, ensure, load, parse, schema, SettingsError, write } from "./settings.js";
@@ -409,16 +409,13 @@ async function listModels() {
         console.log(`${m.id === provider.model ? paint(32, "›") : " "} ${m.id}${m.name && m.name !== m.id ? paint(2, `  ${m.name}`) : ""}`);
     console.log(`\n${provider.model ? `Using ${paint(1, provider.model)}. ` : "No model is set. "}Change it with \`maquette config set model <id>\`.`);
 }
-// What the model is told in `maquette ask`: where it is, and Maquette's tools when it's running.
+// What the model is told in `maquette ask`, from prompts/ask*.md: where it is, and Maquette's
+// tools when it's running.
 function askPrompt(running) {
-    return [
-        "You answer inside Maquette, a terminal program. Maquette runs DesignCraft, a page-layout program, headless, with one shared document that the person and other terminals and sessions send tool calls to.",
-        "This is `maquette ask`: one question, one answer, and you can't call tools yourself here. When the question needs tools, give the `maquette call <tool> --flag value` lines that would do it, each on its own line, for the person to run. Required arguments can go without their flag, objects take JSON or @file, and `maquette tools <tool>` shows a tool's flags. At the `maquette ›` prompt itself, the person can instead just say what they want and the model there calls the tools.",
-        "Write for a terminal: plain sentences and short lists, commands on their own lines, no headings or tables.",
-        running
-            ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}${running.project ? `\n\nThe project's MAQUETTE.md. ${projectRule}\n\n${running.project}` : ""}\n\nIts tools:\n${catalogue(running.tools)}`
-            : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
-    ].join("\n\n");
+    const where = running
+        ? fill("ask-running", { root: running.root, instructions: running.instructions, project: running.project ? `\n\n${fill("ask-project", { memory: running.project })}` : "", tools: catalogue(running.tools) })
+        : fill("ask-not-running");
+    return `${fill("ask")}\n\n${where}`;
 }
 async function ask(tokens) {
     let text = tokens.join(" ").trim();

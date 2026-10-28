@@ -46,6 +46,20 @@ Calls you type at the prompt, and calls from other terminals and sessions over H
 
 Images never go into a trace: a render shows as its path under `maquette-renders/`.
 
+## Prompt versions
+
+The texts the model is told live in [`prompts/`](../prompts/), versioned in git with the code. Each request's span says which of them it was built from:
+
+| Attribute | What it is |
+|---|---|
+| `llm.prompt_template.version` | one version for the whole system prompt; Phoenix shows it with the template |
+| `maquette.prompt.core.version`, `.environment.version`, `.project.version` | each block's version, so you can tell which block changed |
+| `maquette.prompt.<block>.files` | the files the block was filled from, such as `prompts/environment.md` and `prompts/plan-mode.md` |
+| `llm.prompt_template.template`, `llm.prompt_template.variables` | the templates before filling, and what filled them (long values are left out; they're in the input messages) |
+| `maquette.git.commit` | on every span: the commit the code and prompts are from, with `+changes` when `prompts/` or `src/` have edits not yet committed |
+
+A version is a short hash of the template's text, so it changes exactly when the wording does, even before you commit, and stays the same across folders and `MAQUETTE.md` contents. To see whether a prompt change helped, filter or group the spans by the version and compare their failures. Prompts are read once per run, so restart Maquette after editing one.
+
 ## Finding failures
 
 A span that failed has status ERROR and `maquette.failure` set to one of these reasons:

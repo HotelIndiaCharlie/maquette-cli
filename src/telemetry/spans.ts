@@ -6,7 +6,9 @@
 import { context, type Span, SpanStatusCode, type Tracer, trace } from "@opentelemetry/api";
 import type { AgentEvent, Failure } from "../agent/events.ts";
 import { price } from "../agent/cost.ts";
-import { type Message, systemText, type ToolSpec } from "../providers/types.ts";
+import { createHash } from "node:crypto";
+import { template } from "../agent/prompts.ts";
+import { type Message, type SystemBlock, systemText, type ToolSpec } from "../providers/types.ts";
 import type { ServerEvent } from "../server.ts";
 
 type Attributes = Record<string, string | number | boolean | string[]>;
@@ -62,6 +64,27 @@ export function messageAttributes(prefix: string, system: string | undefined, me
   return out;
 }
 
+// Which prompts/*.md the system prompt was filled from, the OpenInference way so Phoenix shows
+// the template, its variables and a version: one for the whole set, and one per block, so a
+// change to a prompt can be compared with the traces before it. Versions hash the templates,
+// not the filled text, so they don't change with the folder or MAQUETTE.md.
+export function promptAttributes(system: SystemBlock[]): Attributes {
+  const blocks = system.filter((b) => b.source);
+  if (!blocks.length) return {};
+  const out: Attributes = {};
+  const variables: Record<string, string> = {};
+  for (const b of blocks) {
+    out[`maquette.prompt.${b.name}.version`] = b.source!.version;
+    out[`maquette.prompt.${b.name}.files`] = b.source!.names.map((n) => `prompts/${n}.md`);
+    // Long values, such as the engine's instructions or MAQUETTE.md, are in the input messages already.
+    for (const [k, v] of Object.entries(b.source!.variables)) variables[k] = v.length > 200 ? `(${v.length} characters; see the input messages)` : v;
+  }
+  out["llm.prompt_template.version"] = createHash("sha256").update(blocks.map((b) => `${b.name}@${b.source!.version}`).join(" ")).digest("hex").slice(0, 8);
+  out["llm.prompt_template.template"] = cap(blocks.map((b) => b.source!.names.map((n) => template(n).text).join("\n\n")).join("\n\n"));
+  out["llm.prompt_template.variables"] = json(variables);
+  return out;
+}
+
 const toolAttributes = (tools: ToolSpec[] = []): Attributes => Object.fromEntries(tools.map((t, i) => [`llm.tools.${i}.tool.json_schema`, json({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })]));
 
 // Failures the person caused aren't the agent's: they're recorded but don't turn a turn red.
@@ -75,14 +98,17 @@ export class Tracing {
   turn?: { span: Span; started: number; answer: string; steps: number; calls: number; failed: number; failures: Set<string>; seen: Map<string, number>; inputs: Map<string, Record<string, unknown>> };
   step?: { span: Span; started: number; firstText?: number };
 
-  constructor(tracer: Tracer, sessionId: string) {
+  common: Attributes; // on every span, such as the commit the code and prompts are from
+
+  constructor(tracer: Tracer, sessionId: string, common: Attributes = {}) {
     this.tracer = tracer;
     this.sessionId = sessionId;
+    this.common = common;
   }
 
   start(name: string, attributes: Attributes, parent?: Span, startTime?: number): Span {
     const ctx = parent ? trace.setSpan(context.active(), parent) : undefined;
-    return this.tracer.startSpan(name, { attributes: { "session.id": this.sessionId, ...attributes }, startTime: startTime ?? clock() }, ctx);
+    return this.tracer.startSpan(name, { attributes: { "session.id": this.sessionId, ...this.common, ...attributes }, startTime: startTime ?? clock() }, ctx);
   }
 
   fail(span: Span, failure: string, message?: string) {
@@ -140,6 +166,7 @@ export class Tracing {
               "input.value": json({ messages: request.messages.length, tools: request.tools?.map((t) => t.name) ?? "text protocol" }),
               "input.mime_type": "application/json",
               "maquette.system_blocks": request.system.map((b) => b.name),
+              ...promptAttributes(request.system),
               ...messageAttributes("llm.input_messages", systemText(request.system), request.messages),
               ...toolAttributes(request.tools),
             },

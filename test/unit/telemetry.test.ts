@@ -9,7 +9,8 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import { BasicTracerProvider, InMemorySpanExporter, type ReadableSpan, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { AgentSession } from "../../src/agent/session.ts";
 import { FakeProvider, type FakeTurn } from "../../src/providers/fake.ts";
-import { endpointOf } from "../../src/telemetry/index.ts";
+import { template } from "../../src/agent/prompts.ts";
+import { endpointOf, gitCommit } from "../../src/telemetry/index.ts";
 import { ensurePhoenix, type Run } from "../../src/telemetry/phoenix.ts";
 import { messageAttributes, Tracing } from "../../src/telemetry/spans.ts";
 import { startLines } from "../../src/ui/app.ts";
@@ -62,6 +63,14 @@ test("a turn is one trace: the turn, a span per request to the model with its in
   assert.equal(second.attributes["llm.input_messages.3.message.role"], "tool");
   assert.match(String(second.attributes["llm.input_messages.4.message.content"]), /^Rendered page 0\.\nimage: .*002-render_page\.png\n\[image .*002-render_page\.png\]$/);
   assert.ok(!Object.values(second.attributes).some((v) => String(v).includes("iVBOR")), "no image data in the trace");
+
+  // Which prompts the request was built from, and their versions.
+  assert.match(String(first.attributes["llm.prompt_template.version"]), /^[0-9a-f]{8}$/);
+  assert.equal(first.attributes["maquette.prompt.core.version"], template("core").version);
+  assert.deepEqual(first.attributes["maquette.prompt.environment.files"], ["prompts/environment.md", "prompts/engine.md"]);
+  assert.ok(String(first.attributes["llm.prompt_template.template"]).includes("{{root}}"), "the template, before it's filled");
+  assert.match(String(first.attributes["llm.prompt_template.variables"]), /"root":"\//);
+  assert.equal(first.attributes["llm.prompt_template.version"], second.attributes["llm.prompt_template.version"]);
 
   const [thinking] = named("thinking");
   assert.equal(parentOf(thinking), first.spanContext().spanId);
@@ -211,4 +220,9 @@ test("the line under the title says tracing is on, or why it's off", () => {
   assert.ok(!strip(startLines(info, "/tmp", status)).some((l) => l.includes("Tracing")));
   assert.ok(strip(startLines({ ...info, trace: { ok: true, text: "Tracing to http://localhost:6006 (Phoenix in Docker), project maquette" } }, "/tmp", status)).includes("  ✓ Tracing to http://localhost:6006 (Phoenix in Docker), project maquette"));
   assert.ok(strip(startLines({ ...info, trace: { ok: false, text: "Tracing is off: Docker isn't installed." } }, "/tmp", status)).includes("  ! Tracing is off: Docker isn't installed."));
+});
+
+test("traces carry the commit the code and prompts are from, marked when there are uncommitted changes", () => {
+  assert.match(gitCommit() ?? "", /^[0-9a-f]{7,}(\+changes)?$/);
+  assert.equal(gitCommit("/"), undefined, "outside a clone there's none");
 });
