@@ -5,7 +5,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { expandHome } from "../args.js";
-import { promptCommands, slashCommands } from "../agent/route.js";
+import { promptCommands, slashAbout, slashCommands } from "../agent/route.js";
 import { Box, h, Text, useInput, useRef, useState } from "./h.js";
 // The options for the word before the cursor, and what to replace it with when there's one.
 export function complete(value, cursor, byName, root) {
@@ -61,7 +61,7 @@ export function complete(value, cursor, byName, root) {
 export function InputBox(props) {
     // Keys can arrive several in one tick (a paste, a test), before React re-renders, so the
     // box's state lives in a ref and a counter forces the redraw.
-    const st = useRef({ value: "", cursor: 0, history: [], at: null, draft: "", hint: null, ctrlC: false });
+    const st = useRef({ value: "", cursor: 0, history: [], at: null, draft: "", hint: null, ctrlC: false, sel: 0 });
     const [, redraw] = useState(0);
     // The handler reads the latest props through a ref, so a key arriving before React
     // re-renders still sees an open permission prompt.
@@ -72,6 +72,7 @@ export function InputBox(props) {
         st.current.value = v;
         st.current.cursor = Math.max(0, Math.min(c, v.length));
         st.current.hint = null;
+        st.current.sel = 0;
         update();
     };
     const setCursor = (c) => {
@@ -81,6 +82,20 @@ export function InputBox(props) {
     useInput((input, key) => {
         const props = latest.current;
         const { value, cursor, history, at, draft, ctrlC } = st.current;
+        if (props.picker) {
+            const { options, index, move, pick } = props.picker;
+            if ((key.ctrl && input === "c") || key.escape)
+                return pick(null);
+            if (key.upArrow)
+                return move((index + options.length - 1) % options.length);
+            if (key.downArrow || key.tab)
+                return move((index + 1) % options.length);
+            if (key.return)
+                return pick(options[index]?.id ?? null);
+            if (/^[1-9]$/.test(input) && Number(input) <= options.length)
+                return pick(options[Number(input) - 1].id);
+            return;
+        }
         if (props.permission) {
             if (key.ctrl && input === "c")
                 return props.onInterrupt();
@@ -115,6 +130,16 @@ export function InputBox(props) {
             return setCursor(value.length);
         if (key.escape)
             return props.onEscape();
+        const slashes = suggestions(value);
+        if (slashes.length && (key.upArrow || key.downArrow)) {
+            st.current.sel = (st.current.sel + (key.upArrow ? slashes.length - 1 : 1)) % slashes.length;
+            return update();
+        }
+        if (slashes.length && (key.tab || (key.return && !slashCommands.includes(value)))) {
+            set(`${slashes[Math.min(st.current.sel, slashes.length - 1)]} `);
+            st.current.sel = 0;
+            return;
+        }
         if (key.return) {
             if (key.shift || key.meta)
                 return set(`${value.slice(0, cursor)}\n${value.slice(cursor)}`, cursor + 1);
@@ -186,14 +211,29 @@ export function InputBox(props) {
     const under = value[cursor] ?? " ";
     const after = value.slice(cursor + 1);
     const lines = `${before}\u0000${under === "\n" ? " \n" : under}${after}`.split("\n");
+    // What the person types is white; a leading /command is cyan, as it's an action, not a message.
+    const slashLen = /^\/\S*/.exec(value)?.[0].length ?? 0;
+    const styled = (text, from, k) => slashLen > from ? [h(Text, { key: `${k}s`, color: "cyan", bold: true }, text.slice(0, slashLen - from)), h(Text, { key: `${k}w`, color: "white" }, text.slice(slashLen - from))] : [h(Text, { key: `${k}w`, color: "white" }, text)];
     const rows = lines.map((line, i) => {
         const parts = [h(Text, { color: "magenta", bold: true }, i === 0 ? "❯ " : "  ")];
         const mark = line.indexOf("\u0000");
+        const offset = i === 0 ? 0 : value.length; // only the first line can hold the /command
         if (mark < 0)
-            parts.push(h(Text, {}, line));
-        else
-            parts.push(h(Text, {}, line.slice(0, mark)), h(Text, { inverse: !props.permission }, line[mark + 1] ?? " "), h(Text, {}, line.slice(mark + 2)));
+            parts.push(...styled(line, offset, "a"));
+        else {
+            const underIsSlash = i === 0 && cursor < slashLen;
+            parts.push(...styled(line.slice(0, mark), offset, "a"), h(Text, { key: "c", inverse: !props.permission && !props.picker, color: underIsSlash ? "cyan" : "white" }, line[mark + 1] ?? " "), ...styled(line.slice(mark + 2), i === 0 ? cursor + 1 : offset, "b"));
+        }
         return h(Box, { key: i }, ...parts);
     });
-    return h(Box, { flexDirection: "column" }, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), ...rows, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), hint ? h(Text, { dimColor: true }, `  ${hint.slice(0, 12).join("  ")}${hint.length > 12 ? "  …" : ""}`) : null);
+    const slashes = suggestions(value);
+    const sel = Math.min(st.current.sel, Math.max(0, slashes.length - 1));
+    const width = Math.max(0, ...slashes.map((c) => c.length));
+    return h(Box, { flexDirection: "column" }, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), ...rows, h(Text, { dimColor: true }, "─".repeat(Math.max(10, (process.stdout.columns || 80) - 1))), hint ? h(Text, { dimColor: true }, `  ${hint.slice(0, 12).join("  ")}${hint.length > 12 ? "  …" : ""}`) : null, ...slashes.map((c, i) => h(Text, { key: c, color: i === sel ? "cyan" : undefined, bold: i === sel }, `  ${i === sel ? "›" : " "} ${c.padEnd(width)}  `, h(Text, { dimColor: i !== sel, color: i === sel ? "cyan" : undefined }, slashAbout[c]))));
+}
+// The slash commands that match what's typed so far, while only the command is typed.
+function suggestions(value) {
+    if (!/^\/\S*$/.test(value))
+        return [];
+    return slashCommands.filter((c) => c.startsWith(value));
 }

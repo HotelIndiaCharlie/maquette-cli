@@ -1,17 +1,18 @@
 // The screen: finished items above, the live turn, then the input box and footer. It
 // subscribes to the session's and the server's events and draws them; the logic is theirs.
-import type { AgentEvent, PermissionAnswer, Status } from "../agent/events.ts";
+import type { AgentEvent, Choice, PermissionAnswer, Status } from "../agent/events.ts";
 import type { AgentSession } from "../agent/session.ts";
 import { tilde } from "../args.ts";
 import { bannerText } from "../banner.ts";
 import type { ServerEvent, ServerHandle } from "../server.ts";
 import { Box, h, Text, useApp, useEffect, useRef, useState, useStdout } from "./h.ts";
 import { InputBox } from "./input.ts";
-import { Footer, Notices, PermissionPrompt, type Segment, shortcuts, Turn } from "./parts.ts";
+import { Footer, Notices, PermissionPrompt, Picker, type Segment, shortcuts, Turn } from "./parts.ts";
 import { type Item, type ItemBody, type ToolItem, Transcript } from "./transcript.ts";
 
 export type Info = { version: string; engineName: string; toolCount: number; port: number; images: string; hint?: string };
 type Ask = { id: string; name: string; input: Record<string, unknown>; reply: (a: PermissionAnswer) => void };
+type Choosing = { title: string; options: Choice[]; index: number; reply: (id: string | null) => void };
 type ServerLike = Pick<ServerHandle, "root" | "byName" | "on">;
 
 export function startLines(info: Info, root: string, status: Status): string[] {
@@ -37,6 +38,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
   const [segments, setSegments] = useState<Segment[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
+  const [pick, setPick] = useState<Choosing | null>(null);
   const [status, setStatus] = useState<Status>(session.status);
   const [notices, setNotices] = useState<{ text: string; level: "info" | "warn" | "error" }[]>([]);
   const [helpShown, setHelpShown] = useState(false);
@@ -72,6 +74,14 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
             e.reply(a);
           } });
           break;
+        case "choose": {
+          const index = Math.max(0, e.options.findIndex((o) => o.id === e.current));
+          setPick({ title: e.title, options: e.options, index, reply: (id) => {
+            setPick(null);
+            e.reply(id);
+          } });
+          break;
+        }
         case "shell":
           add({ kind: "shell", command: e.command, output: e.output, code: e.code });
           break;
@@ -129,6 +139,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
     h(Transcript, { items, root: server.root }),
     segments ? h(Turn, { segments, root: server.root, waiting: busy && !ask }) : null,
     ask ? h(PermissionPrompt, { name: ask.name, input: ask.input }) : null,
+    pick ? h(Picker, { title: pick.title, options: pick.options, index: pick.index }) : null,
     h(Notices, { notices }),
     helpShown ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, shortcuts)) : null,
     h(InputBox, {
@@ -136,6 +147,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
       root: server.root,
       busy,
       permission: ask,
+      picker: pick ? { options: pick.options, index: pick.index, move: (index) => setPick((p) => (p ? { ...p, index } : p)), pick: pick.reply } : null,
       onSubmit: (line) => void session.submit(line),
       onInterrupt: () => session.interrupt(),
       onExit: () => void session.submit("exit"),

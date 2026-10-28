@@ -47,13 +47,13 @@ export function renderItem(item: Item, root: string): ReactNode {
       // An empty Text draws nothing, so a blank line is drawn as a space.
       return h(Box, { flexDirection: "column", marginBottom: 1 }, ...item.lines.map((l, i) => h(Text, { key: i }, l || " ")));
     case "user":
-      return h(Box, { marginTop: 1 }, h(Text, { color: "magenta", bold: true }, "❯ "), h(Text, {}, item.text));
+      return h(Box, { marginTop: 1 }, h(Text, { color: "magenta", bold: true }, "❯ "), h(Text, { color: "white" }, item.text));
     case "answer":
       return h(Box, { marginTop: 1, paddingLeft: 2 }, h(Markdown, { text: item.text }));
     case "tool":
       return h(Box, { paddingLeft: 2 }, h(ToolLine, { item, root, frame: 0 }));
     case "shell":
-      return h(Box, { flexDirection: "column", marginTop: 1 }, h(Text, {}, h(Text, { color: "magenta", bold: true }, "! "), h(Text, { bold: true }, item.command), item.code ? h(Text, { color: "red" }, `  exit ${item.code}`) : null), item.output ? h(Box, { paddingLeft: 2 }, h(Text, { dimColor: item.code === 0 }, item.output)) : null);
+      return h(Box, { flexDirection: "column", marginTop: 1 }, h(Text, {}, h(Text, { color: "magenta", bold: true }, "! "), h(Text, { color: "white", bold: true }, item.command), item.code ? h(Text, { color: "red" }, `  exit ${item.code}`) : null), item.output ? h(Box, { paddingLeft: 2 }, h(Text, { dimColor: item.code === 0 }, item.output)) : null);
     case "output":
       return h(Box, { flexDirection: "column", paddingLeft: 2 }, h(Text, { color: item.ok ? undefined : "red" }, item.text), ...(item.images ?? []).map((p, i) => h(Text, { key: i }, h(Text, { color: "cyan" }, "image "), relative(root, p), h(Text, { dimColor: true }, "  (open shows it)"))));
     case "notice":

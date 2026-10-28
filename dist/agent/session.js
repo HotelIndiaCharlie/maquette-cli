@@ -199,7 +199,9 @@ export class AgentSession {
         }
         if (name === "permissions") {
             if (!args)
-                return this.emit({ type: "output", text: `Permission mode: ${this.mode} (${modeHelp[this.mode]}).\n/permissions ${modes.join("|")} changes it, for this folder.` });
+                args = (await this.choose("Permission mode", modes.map((m) => ({ id: m, label: m, hint: modeHelp[m] })), this.mode)) ?? "";
+            if (!args)
+                return;
             if (!modes.includes(args))
                 return this.notice(`There's no permission mode "${args}"; the modes are ${modes.join(", ")}.`, "warn");
             this.mode = args;
@@ -221,14 +223,17 @@ export class AgentSession {
                 catch (e) {
                     return this.notice(e.message, "error");
                 }
-                const marked = list.map((m) => `${m.id === this.provider.model ? "› " : "  "}${m.id}${m.name && m.name !== m.id ? `  ${m.name}` : ""}`);
-                return this.emit({ type: "output", text: `${list.length} models from ${this.provider.name}:\n${marked.join("\n")}\n/model <id> switches.` });
+                args = (await this.choose(`Model, from ${this.provider.name}`, list.map((m) => ({ id: m.id, label: m.id, hint: m.name && m.name !== m.id ? m.name : undefined })), this.provider.model)) ?? "";
+                if (!args)
+                    return;
             }
             return this.switchProvider({ ...settings, model: args });
         }
         if (name === "provider") {
             if (!args)
-                return this.emit({ type: "output", text: `Provider: ${this.provider.name}, model ${this.provider.model || "(none set)"}.\n/provider ${providerNames.join("|")} switches.` });
+                args = (await this.choose("Provider", [{ id: "anthropic", label: "anthropic", hint: "Claude, through the Anthropic API" }, { id: "openai-compatible", label: "openai-compatible", hint: "Ollama, LM Studio, llama.cpp, vLLM, OpenRouter, …" }], this.provider.name)) ?? "";
+            if (!args)
+                return;
             if (!providerNames.includes(args))
                 return this.notice(`There's no provider "${args}"; the providers are ${providerNames.join(", ")}.`, "warn");
             // The model named in the settings belongs to the provider it was set for, so the new
@@ -236,6 +241,13 @@ export class AgentSession {
             return this.switchProvider({ ...settings, provider: args, model: defaultModels[args] });
         }
         this.notice(`There's no /${name}. The slash commands are ${slashCommands.join(", ")}.`, "warn");
+    }
+    // A list to pick from. The screen answers it; with no screen listening, the first option
+    // that is current stays and nothing changes.
+    choose(title, options, current) {
+        if (!this.#listeners.size)
+            return Promise.resolve(null);
+        return new Promise((reply) => this.emit({ type: "choose", title, options, current, reply }));
     }
     switchProvider(settings) {
         try {

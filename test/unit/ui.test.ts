@@ -171,3 +171,34 @@ test("completion offers tools, flags, slash commands and paths", () => {
   assert.ok(c("@./").options.some((o) => /001|\.png$|^@\.\//.test(o)) || c("@./").options.length === 0);
   assert.equal(c("hello wor").replace, undefined);
 });
+
+test("/model, /provider and /permissions open a list: arrows and numbers pick, esc leaves it", async () => {
+  const s = screen([], "ask");
+  await tick();
+  await s.type("/per");
+  assert.match(s.frame(), /› \/permissions {2}pick a permission mode/);
+  s.stdin.write("\r"); // completes the command
+  await tick();
+  assert.match(s.frame(), /❯ \/permissions/);
+  s.stdin.write("\r"); // runs it: the picker opens
+  await s.until(/Permission mode/);
+  assert.match(s.frame(), /› {2}1\. ask/);
+  s.stdin.write("\x1b[B"); // ↓
+  await tick();
+  assert.match(s.frame(), /› {2}2\. auto/);
+  s.stdin.write("\r");
+  await s.until(/Permission mode: auto/);
+  assert.equal(s.session.mode, "auto");
+  await s.type("/provider");
+  await s.enter(/Provider/);
+  s.stdin.write("\x1b"); // esc: nothing changes
+  await tick();
+  assert.equal(s.session.provider.name, "fake");
+  assert.doesNotMatch(s.frame(), /› {2}1\. anthropic/);
+  await s.type("/model");
+  await s.enter(/Model, from fake/);
+  s.stdin.write("1");
+  await s.until(/Now using fake/);
+  assert.equal(s.session.provider.model, "fake");
+  s.unmount();
+});

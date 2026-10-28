@@ -11,7 +11,16 @@ export type Route =
   | { kind: "message"; text: string };
 
 export const promptCommands = ["help", "tools", "example", "open", "exit"];
-export const slashCommands = ["/help", "/model", "/provider", "/permissions", "/clear", "/cost", "/tools"];
+export const slashAbout: Record<string, string> = {
+  "/help": "the slash commands",
+  "/model": "pick a model, or /model <id>",
+  "/provider": "pick a provider: anthropic or openai-compatible",
+  "/permissions": "pick a permission mode: ask, auto or plan",
+  "/clear": "start a new conversation",
+  "/cost": "tokens and dollars this session",
+  "/tools": "the tools, one line each",
+};
+export const slashCommands = Object.keys(slashAbout);
 
 export function route(line: string, isTool: (name: string) => boolean): Route {
   const text = line.trim();

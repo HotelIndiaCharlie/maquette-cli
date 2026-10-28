@@ -1,7 +1,16 @@
 // What a typed line means. A tool's name or one of the prompt's own commands runs directly,
 // `/…` is a slash command, `!…` runs in the shell, and anything else goes to the model.
 export const promptCommands = ["help", "tools", "example", "open", "exit"];
-export const slashCommands = ["/help", "/model", "/provider", "/permissions", "/clear", "/cost", "/tools"];
+export const slashAbout = {
+    "/help": "the slash commands",
+    "/model": "pick a model, or /model <id>",
+    "/provider": "pick a provider: anthropic or openai-compatible",
+    "/permissions": "pick a permission mode: ask, auto or plan",
+    "/clear": "start a new conversation",
+    "/cost": "tokens and dollars this session",
+    "/tools": "the tools, one line each",
+};
+export const slashCommands = Object.keys(slashAbout);
 export function route(line, isTool) {
     const text = line.trim();
     if (!text)

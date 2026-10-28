@@ -2,7 +2,7 @@ import { tilde } from "../args.js";
 import { bannerText } from "../banner.js";
 import { Box, h, Text, useApp, useEffect, useRef, useState, useStdout } from "./h.js";
 import { InputBox } from "./input.js";
-import { Footer, Notices, PermissionPrompt, shortcuts, Turn } from "./parts.js";
+import { Footer, Notices, PermissionPrompt, Picker, shortcuts, Turn } from "./parts.js";
 import { Transcript } from "./transcript.js";
 export function startLines(info, root, status) {
     const tick = "\x1b[32m✓\x1b[0m";
@@ -26,6 +26,7 @@ export function App({ session, server, info, onExit }) {
     const [segments, setSegments] = useState(null);
     const [busy, setBusy] = useState(false);
     const [ask, setAsk] = useState(null);
+    const [pick, setPick] = useState(null);
     const [status, setStatus] = useState(session.status);
     const [notices, setNotices] = useState([]);
     const [helpShown, setHelpShown] = useState(false);
@@ -62,6 +63,14 @@ export function App({ session, server, info, onExit }) {
                             e.reply(a);
                         } });
                     break;
+                case "choose": {
+                    const index = Math.max(0, e.options.findIndex((o) => o.id === e.current));
+                    setPick({ title: e.title, options: e.options, index, reply: (id) => {
+                            setPick(null);
+                            e.reply(id);
+                        } });
+                    break;
+                }
                 case "shell":
                     add({ kind: "shell", command: e.command, output: e.output, code: e.code });
                     break;
@@ -116,11 +125,12 @@ export function App({ session, server, info, onExit }) {
         copy.push({ ...it, key: keys.current++, expanded: !it.expanded });
         return copy;
     });
-    return h(Box, { flexDirection: "column" }, h(Transcript, { items, root: server.root }), segments ? h(Turn, { segments, root: server.root, waiting: busy && !ask }) : null, ask ? h(PermissionPrompt, { name: ask.name, input: ask.input }) : null, h(Notices, { notices }), helpShown ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, shortcuts)) : null, h(InputBox, {
+    return h(Box, { flexDirection: "column" }, h(Transcript, { items, root: server.root }), segments ? h(Turn, { segments, root: server.root, waiting: busy && !ask }) : null, ask ? h(PermissionPrompt, { name: ask.name, input: ask.input }) : null, pick ? h(Picker, { title: pick.title, options: pick.options, index: pick.index }) : null, h(Notices, { notices }), helpShown ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, shortcuts)) : null, h(InputBox, {
         byName: server.byName,
         root: server.root,
         busy,
         permission: ask,
+        picker: pick ? { options: pick.options, index: pick.index, move: (index) => setPick((p) => (p ? { ...p, index } : p)), pick: pick.reply } : null,
         onSubmit: (line) => void session.submit(line),
         onInterrupt: () => session.interrupt(),
         onExit: () => void session.submit("exit"),
