@@ -7,6 +7,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Tracing } from "./spans.js";
+export { ensurePhoenix } from "./phoenix.js";
 export const defaultEndpoint = "http://localhost:6006";
 // MAQUETTE_TRACE=1 means Phoenix on its usual port; a URL names another collector.
 export function endpointOf(value) {
@@ -16,18 +17,15 @@ export function endpointOf(value) {
 export function startTracing(options) {
     const url = endpointOf(options.value);
     const exporter = new OTLPTraceExporter({ url });
-    // Says once whether the collector takes the spans, since a missing one fails silently.
+    // Says once when the collector stops taking spans, since a missing one fails silently.
     let told = false;
     const reporting = {
         export(spans, done) {
             exporter.export(spans, (result) => {
-                if (!told) {
+                // 0 is ExportResultCode.SUCCESS.
+                if (result.code !== 0 && !told) {
                     told = true;
-                    // 0 is ExportResultCode.SUCCESS.
-                    if (result.code === 0)
-                        options.say(`Tracing to ${url.replace(/\/v1\/traces$/, "")}, project maquette.`, "info");
-                    else
-                        options.say(`Tracing couldn't send to ${url}: ${result.error?.message ?? "no reply"}. Is Phoenix running? See docs/telemetry.md.`, "warn");
+                    options.say(`Tracing couldn't send to ${url}: ${result.error?.message ?? "no reply"}. Is Phoenix running? See docs/telemetry.md.`, "warn");
                 }
                 done(result);
             });

@@ -37,11 +37,13 @@ A tool's arguments are --flags (render_page --page 0); its required ones can go 
 flag (open_document example/annual-report.designcraft). @file reads a value from a JSON file,
 and a single {…} or @file gives all the arguments. Paths are relative to the folder Maquette
 runs in, and DesignCraft reads and writes only inside it.
-Options: --port <n> (default 8787) for every command; --json for call, tools and models (the
-raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another DesignCraft CLI; --from <zip>
-to install the CLI from a downloaded copy of its release zip; --provider <name> and --model <id>
-for ask and models; --image <file> (repeatable) to show the model an image with ask; --project
-for config set, unset and edit, to use .maquette/settings.json here instead of ~/.maquette.`;
+Options: --port <n> (default 8787) for every command; --trace with maquette alone, to start
+Phoenix (in Docker, starting Docker if need be) and trace every turn and call to it; --json for
+call, tools and models (the raw reply); --designcraft <path> (or DESIGNCRAFT_CLI) to run another
+DesignCraft CLI; --from <zip> to install the CLI from a downloaded copy of its release zip;
+--provider <name> and --model <id> for ask and models; --image <file> (repeatable) to show the
+model an image with ask; --project for config set, unset and edit, to use .maquette/settings.json
+here instead of ~/.maquette.`;
 function fail(message) {
     console.error(message);
     process.exit(1);
@@ -61,6 +63,7 @@ const portFlag = option("port", true);
 const asJson = option("json") !== undefined;
 const designcraftFlag = option("designcraft", true);
 const fromZip = option("from", true);
+const traceFlag = option("trace") !== undefined;
 const wantsHelp = option("help") !== undefined || argv.includes("-h");
 const wantsVersion = option("version") !== undefined || argv.includes("-v");
 const [command, ...rest] = argv;
@@ -174,10 +177,15 @@ async function serve() {
     const hint = !readdirSync(root).some((f) => f.endsWith(".designcraft")) ? `No document here yet? ${paint(36, "example")} copies in an example report.` : undefined;
     if (!interactive) {
         const tick = paint(32, "✓");
+        const traced = await trace(server, undefined, (text, level) => console.log(`  ${level === "warn" ? paint(33, "!") : tick} ${text}`));
+        tracing = traced.tracing;
         console.log(`\n  ${tick} ${engineName}, headless, with Maquette's tools (${server.tools.length} tools)`);
         console.log(`  ${tick} Working in ${paint(1, tilde(root))}: DesignCraft reads and writes only here`);
         console.log(`  ${tick} Listening on ${paint(1, `http://127.0.0.1:${port}`)} for other sessions`);
-        console.log(`  ${tick} Renders go to ${relative(root, server.images)}/\n`);
+        console.log(`  ${tick} Renders go to ${relative(root, server.images)}/`);
+        if (traced.line)
+            console.log(`  ${traced.line.ok ? tick : paint(33, "!")} ${traced.line.text}`);
+        console.log();
         console.log(`  From another terminal: ${paint(36, "maquette tools")}, then ${paint(36, "maquette call <tool> --flag value")}`);
         console.log(`  ${paint(2, "Ctrl-C stops it; unsaved changes to the document are lost.")}\n`);
         server.on((e) => {
@@ -186,7 +194,6 @@ async function serve() {
             else if (e.type === "engine_log")
                 process.stderr.write(paint(2, e.text.replace(/^(?=.)/gm, "  ")));
         });
-        tracing = await trace(server, undefined, (text, level) => console.log(`  ${level === "warn" ? paint(33, "!") : tick} ${text}`));
         process.on("SIGINT", () => void stop());
         process.on("SIGTERM", () => void stop());
         return;
@@ -194,27 +201,39 @@ async function serve() {
     const { AgentSession } = await import("./agent/session.js");
     const { runApp } = await import("./ui/app.js");
     const session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample });
-    tracing = await trace(server, session, (text, level) => session.notice(text, level));
+    const traced = await trace(server, session, (text, level) => session.notice(text, level));
+    tracing = traced.tracing;
     process.on("SIGTERM", () => void stop());
     // Clear the screen first, so the title starts at the top; what was there stays in the scrollback.
     process.stdout.write("\x1b[2J\x1b[H");
-    await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint });
+    await runApp(session, server, { version, engineName, toolCount: server.tools.length, port, images: relative(root, server.images), hint, trace: traced.line });
     await stop();
 }
-// MAQUETTE_TRACE turns on tracing to Phoenix, for development: docs/telemetry.md.
+// --trace starts Phoenix on localhost:6006 (and Docker, if need be) and traces to it;
+// MAQUETTE_TRACE traces to a collector that's already running. For development: docs/telemetry.md.
+// The line it returns goes under the title, so it's clear tracing is on, or why it isn't.
 async function trace(server, session, say) {
-    const value = process.env.MAQUETTE_TRACE;
+    const value = traceFlag ? "1" : process.env.MAQUETTE_TRACE;
     if (!value)
-        return undefined;
+        return {};
+    let telemetry;
     try {
-        const { startTracing } = await import("./telemetry/index.js");
-        return startTracing({ value, server, session, say, version });
+        telemetry = await import("./telemetry/index.js");
     }
     catch (e) {
-        // The screen isn't up yet, so the notice waits a moment.
-        setTimeout(() => say(`MAQUETTE_TRACE is set, but tracing couldn't start: ${e.message}. It needs the dev dependencies, from a clone: npm install.`, "warn"), 500);
-        return undefined;
+        return { line: { ok: false, text: `Tracing is off: it needs the dev dependencies, so run from a clone after npm install (${e.message})` } };
     }
+    let how = "";
+    if (traceFlag) {
+        try {
+            how = await telemetry.ensurePhoenix({ say: (text) => console.log(`  ${paint(2, text)}`) });
+        }
+        catch (e) {
+            return { line: { ok: false, text: `Tracing is off: ${e.message}` } };
+        }
+    }
+    const tracing = telemetry.startTracing({ value, server, session, say, version });
+    return { tracing, line: { ok: true, text: `Tracing to ${paint(1, tracing.url.replace(/\/v1\/traces$/, ""))}${how ? ` (${how})` : ""}, project maquette` } };
 }
 async function request(path, body) {
     try {

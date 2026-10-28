@@ -6,28 +6,25 @@ It's off unless `MAQUETTE_TRACE` is set, and it runs only from a clone, since th
 
 ## Run it
 
-Start Phoenix, in a terminal of its own:
+From a clone, after `npm install`:
 
 ```bash
-pip install arize-phoenix
-phoenix serve
+npm run dev -- --trace
 ```
 
-Or with Docker:
+or, with the branch alias, `mqtb --trace`. Before the prompt opens, `--trace` makes sure Phoenix is answering on http://localhost:6006:
 
-```bash
-docker run -p 6006:6006 arizephoenix/phoenix:latest
-```
+- Phoenix already up there is used as it is.
+- Otherwise it runs in Docker, in a container named `maquette-phoenix` (image `arizephoenix/phoenix:version-20.21.4`, port 6006 on localhost only, traces kept in the `maquette-phoenix` volume). The first time downloads the image. A stopped container is started again rather than made anew.
+- If Docker's daemon isn't running, it's started first: Docker Desktop on macOS (`open -a Docker`), `systemctl start docker` on Linux. Waiting for it can take up to two minutes.
 
-Then run Maquette from the clone with tracing on, and open http://localhost:6006:
+The list under the title then says `✓ Tracing to http://localhost:6006 (Phoenix in Docker), project maquette`, or `! Tracing is off: …` with the reason, and Maquette runs on without tracing. Open http://localhost:6006 and the **maquette** project.
 
-```bash
-MAQUETTE_TRACE=1 npm run dev
-```
+The container keeps running after Maquette stops, so the traces stay readable. `docker stop maquette-phoenix` stops it; `docker rm maquette-phoenix && docker volume rm maquette-phoenix` removes it and its traces.
 
-`MAQUETTE_TRACE=1` sends to Phoenix at `http://localhost:6006`. Set it to a URL to send somewhere else, such as `MAQUETTE_TRACE=http://127.0.0.1:4318` for another OTLP collector. A notice says when the first spans arrived, or why they couldn't be sent. Traces land in Phoenix's **maquette** project.
+To send to a collector that's already running instead, without starting anything, set `MAQUETTE_TRACE`: `MAQUETTE_TRACE=1` for Phoenix on localhost:6006, or a URL such as `MAQUETTE_TRACE=http://127.0.0.1:4318` for another OTLP collector. A notice says if spans stop getting through.
 
-The server alone (`maquette < /dev/null`) traces too: calls from other terminals and sessions each get a trace of their own. `maquette ask` isn't traced.
+The server alone (`maquette --trace < /dev/null`) traces too: calls from other terminals and sessions each get a trace of their own. `maquette ask` isn't traced.
 
 ## What a trace shows
 
@@ -82,4 +79,4 @@ For an open model, the server has to be one that returns the reasoning. Ollama a
 
 ## Taking it out
 
-Tracing is for development. To remove it, delete `src/telemetry/` and `test/unit/telemetry.test.ts`, the `trace` function in `src/cli.ts` and its two callers, and the `@opentelemetry/*` dev dependencies. The step and failure events in `src/agent/events.ts` stay: the screen ignores them, and a JSON mode or remote logging can use them.
+Tracing is for development. To remove it, delete `src/telemetry/` and `test/unit/telemetry.test.ts`, the `--trace` option and the `trace` function in `src/cli.ts` with its two callers, the `trace` line in `src/ui/app.ts`, and the `@opentelemetry/*` dev dependencies. The step and failure events in `src/agent/events.ts` stay: the screen ignores them, and a JSON mode or remote logging can use them.

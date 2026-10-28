@@ -10,6 +10,8 @@ import type { AgentEvent } from "../agent/events.ts";
 import type { ServerEvent } from "../server.ts";
 import { Tracing } from "./spans.ts";
 
+export { ensurePhoenix } from "./phoenix.ts";
+
 export const defaultEndpoint = "http://localhost:6006";
 
 // MAQUETTE_TRACE=1 means Phoenix on its usual port; a URL names another collector.
@@ -29,16 +31,15 @@ export type TracingOptions = {
 export function startTracing(options: TracingOptions): { url: string; shutdown(): Promise<void> } {
   const url = endpointOf(options.value);
   const exporter = new OTLPTraceExporter({ url });
-  // Says once whether the collector takes the spans, since a missing one fails silently.
+  // Says once when the collector stops taking spans, since a missing one fails silently.
   let told = false;
   const reporting: SpanExporter = {
     export(spans: ReadableSpan[], done) {
       exporter.export(spans, (result) => {
-        if (!told) {
+        // 0 is ExportResultCode.SUCCESS.
+        if (result.code !== 0 && !told) {
           told = true;
-          // 0 is ExportResultCode.SUCCESS.
-          if (result.code === 0) options.say(`Tracing to ${url.replace(/\/v1\/traces$/, "")}, project maquette.`, "info");
-          else options.say(`Tracing couldn't send to ${url}: ${result.error?.message ?? "no reply"}. Is Phoenix running? See docs/telemetry.md.`, "warn");
+          options.say(`Tracing couldn't send to ${url}: ${result.error?.message ?? "no reply"}. Is Phoenix running? See docs/telemetry.md.`, "warn");
         }
         done(result);
       });

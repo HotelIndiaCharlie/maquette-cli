@@ -13,6 +13,7 @@ export function startLines(info, root, status) {
         `  ${tick} Listening on ${bold(`http://127.0.0.1:${info.port}`)} for other sessions`,
         `  ${tick} Renders go to ${info.images}/`,
         `  ${tick} Model ${bold(status.model)} from ${status.provider}${status.effort ? `, effort ${status.effort}` : ""}, permission mode ${bold(status.mode)}`,
+        ...(info.trace ? [`  ${info.trace.ok ? tick : "\x1b[33m!\x1b[0m"} ${info.trace.text}`] : []),
         "",
         `  Type what you want done, or a tool and its flags. ${bold("help")} shows how, ${bold("/help")} the slash commands.`,
         ...(info.hint ? [`  ${info.hint}`] : []),

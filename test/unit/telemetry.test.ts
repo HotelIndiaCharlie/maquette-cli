@@ -10,7 +10,9 @@ import { BasicTracerProvider, InMemorySpanExporter, type ReadableSpan, SimpleSpa
 import { AgentSession } from "../../src/agent/session.ts";
 import { FakeProvider, type FakeTurn } from "../../src/providers/fake.ts";
 import { endpointOf } from "../../src/telemetry/index.ts";
+import { ensurePhoenix, type Run } from "../../src/telemetry/phoenix.ts";
 import { messageAttributes, Tracing } from "../../src/telemetry/spans.ts";
+import { startLines } from "../../src/ui/app.ts";
 import { fakeServer, settings } from "./fake-server.ts";
 
 function traced(turns: FakeTurn[], answer: (name: string) => "y" | "n" = () => "y") {
@@ -148,4 +150,65 @@ test("the conversation flattens the way OpenInference reads it", () => {
     "llm.input_messages.3.message.name": "render_page",
     "llm.input_messages.3.message.content": "Error: Failed.",
   });
+});
+
+// A fake docker: answers from a script and records what was run.
+function fakeDocker(script: { daemon?: "up" | "down" | "missing"; startsDaemon?: boolean; container?: "" | "running" | "exited"; comesUp?: boolean }) {
+  const ran: string[] = [];
+  let daemon = script.daemon ?? "up";
+  let up = false;
+  const run: Run = async (command, args) => {
+    ran.push(`${command} ${args.join(" ")}`);
+    if (command === "docker" && daemon === "missing") return { code: null, out: "", missing: true };
+    if (command === "open" || command === "systemctl") {
+      if (script.startsDaemon === false) return { code: 1, out: "Unit docker.service not found." };
+      daemon = "up";
+      return { code: 0, out: "" };
+    }
+    if (args[0] === "info") return daemon === "up" ? { code: 0, out: "29.9.2" } : { code: 1, out: "Cannot connect to the Docker daemon" };
+    if (args[0] === "ps") return { code: 0, out: script.container ?? "" };
+    if (args[0] === "run" || args[0] === "start") {
+      up = script.comesUp ?? true;
+      return { code: 0, out: "" };
+    }
+    return { code: 1, out: `unexpected: ${command} ${args.join(" ")}` };
+  };
+  const options = { say: () => {}, run, isHealthy: async () => up, sleep: async () => {}, platform: "darwin" as const };
+  return { ran, options };
+}
+
+test("--trace uses a Phoenix that's already running, and touches nothing", async () => {
+  const { ran, options } = fakeDocker({});
+  assert.equal(await ensurePhoenix({ ...options, isHealthy: async () => true }), "Phoenix already running");
+  assert.deepEqual(ran, []);
+});
+
+test("--trace starts Docker when its daemon is down, then creates Phoenix's container", async () => {
+  const { ran, options } = fakeDocker({ daemon: "down" });
+  assert.equal(await ensurePhoenix(options), "Docker started, Phoenix in Docker");
+  assert.ok(ran.includes("open -a Docker"));
+  const create = ran.find((r) => r.startsWith("docker run"));
+  assert.match(create!, /--name maquette-phoenix -p 127\.0\.0\.1:6006:6006 -v maquette-phoenix:\/mnt\/data .* arizephoenix\/phoenix:version-\d+\.\d+\.\d+$/);
+});
+
+test("--trace restarts a stopped container rather than making another", async () => {
+  const { ran, options } = fakeDocker({ container: "exited" });
+  assert.equal(await ensurePhoenix({ ...options, platform: "linux" }), "Phoenix in Docker");
+  assert.ok(ran.includes("docker start maquette-phoenix"));
+  assert.ok(!ran.some((r) => r.startsWith("docker run")));
+});
+
+test("--trace says why tracing is off when Phoenix can't be started", async () => {
+  await assert.rejects(ensurePhoenix(fakeDocker({ daemon: "missing" }).options), /Docker isn't installed/);
+  await assert.rejects(ensurePhoenix({ ...fakeDocker({ daemon: "down", startsDaemon: false }).options, platform: "linux" }), /couldn't be started \(Unit docker.service not found\.\)/);
+  await assert.rejects(ensurePhoenix(fakeDocker({ comesUp: false }).options), /nothing answers on http:\/\/localhost:6006/);
+});
+
+test("the line under the title says tracing is on, or why it's off", () => {
+  const status = { provider: "fake", model: "fake", mode: "ask", tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, turns: 0, textProtocol: false };
+  const info = { version: "t", engineName: "Engine", toolCount: 5, port: 8787, images: "maquette-renders/x" };
+  const strip = (lines: string[]) => lines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+  assert.ok(!strip(startLines(info, "/tmp", status)).some((l) => l.includes("Tracing")));
+  assert.ok(strip(startLines({ ...info, trace: { ok: true, text: "Tracing to http://localhost:6006 (Phoenix in Docker), project maquette" } }, "/tmp", status)).includes("  ✓ Tracing to http://localhost:6006 (Phoenix in Docker), project maquette"));
+  assert.ok(strip(startLines({ ...info, trace: { ok: false, text: "Tracing is off: Docker isn't installed." } }, "/tmp", status)).includes("  ! Tracing is off: Docker isn't installed."));
 });
