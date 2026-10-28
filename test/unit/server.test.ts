@@ -36,7 +36,7 @@ async function start(extra: string[] = []) {
 
 test("without a terminal, maquette serves calls, prints plain log lines and doesn't load Ink", async () => {
   const m = await start(["--import", hook]);
-  assert.match(m.out(), /8 tools\)/, m.err());
+  assert.match(m.out(), /16 tools\)/, m.err());
   assert.match(m.out(), /From another terminal/);
   const tools = await (await fetch(`http://127.0.0.1:${m.port}/tools`)).json();
   // macOS reports the temp folder through its /private symlink.
@@ -46,6 +46,10 @@ test("without a terminal, maquette serves calls, prints plain log lines and does
   assert.equal(r.ok, true);
   assert.equal(r.source, "http");
   assert.match(r.images[0], /001-render_page\.png$/);
+  // The workspace tools answer over HTTP too, in the server's folder.
+  writeFileSync(join(m.cwd, "spec.json"), '{"mark":"bar"}\n');
+  const read = await (await fetch(`http://127.0.0.1:${m.port}/call`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tool: "read_file", arguments: { path: "spec.json" } }) })).json();
+  assert.equal(read.text, '{"mark":"bar"}');
   const bad = await fetch(`http://127.0.0.1:${m.port}/call`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tool: "nope" }) });
   assert.equal(bad.status, 400);
   await new Promise((r) => setTimeout(r, 100));

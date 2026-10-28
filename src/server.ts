@@ -14,6 +14,8 @@ import type { ToolResult } from "./designcraft.ts";
 export type Source = "prompt" | "model" | "http";
 export type Reply = { id: number; tool: string; ok: boolean; text: string; images: string[]; source: Source; ms: number };
 
+const extensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+
 export type ServerEvent =
   | { type: "call"; reply: Reply; args: Record<string, unknown>; at: Date } // a call finished, with everything its log line shows
   | { type: "engine_log"; text: string } // a line the engine wrote to stderr
@@ -79,7 +81,7 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         else if (c.type === "image" && c.data) {
           mkdirSync(images, { recursive: true });
           const n = reply.images.length ? `-${reply.images.length + 1}` : "";
-          const path = join(images, `${String(id).padStart(3, "0")}-${tool}${n}.${c.mimeType === "image/jpeg" ? "jpg" : "png"}`);
+          const path = join(images, `${String(id).padStart(3, "0")}-${tool}${n}.${extensions[c.mimeType ?? ""] ?? "png"}`);
           writeFileSync(path, Buffer.from(c.data, "base64"));
           reply.images.push(path);
           lastImage = path;
