@@ -1,6 +1,6 @@
 // A stand-in for the running server in the agent and screen tests: it records every call and
 // answers from a script, with a real PNG on disk when a reply has an image.
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServerLike } from "../../src/agent/session.ts";
@@ -20,7 +20,9 @@ export const tools: Tool[] = [
 
 export type Call = { tool: string; args: Record<string, unknown>; source: Source };
 
-export function fakeServer(root = mkdtempSync(join(tmpdir(), "maquette-agent-"))) {
+// The real path: on macOS the temp folder is reached through a symlink, and a shell's $PWD
+// resolves it, so the tests compare against the resolved form.
+export function fakeServer(root = realpathSync(mkdtempSync(join(tmpdir(), "maquette-agent-")))) {
   const calls: Call[] = [];
   const listeners = new Set<(e: ServerEvent) => void>();
   let id = 0;
