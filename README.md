@@ -292,6 +292,22 @@ npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
 
+Every push and pull request runs `typecheck`, `test:unit`, `smoke` and a check that `dist/` matches `src/`, on Linux and macOS with Node 24 ([`.github/workflows/test.yml`](.github/workflows/test.yml)); the result shows as the "Unit tests" check on the branch.
+
+### Testing a branch beside main
+
+Keep two checkouts: `~/maquette-cli` on main, linked as the global `maquette`, and `~/maquette-cli-test` for the branch under test, run from its source as `mqtb` on its own port. No build and no `npm link` for the branch, so main keeps working and both can run at once.
+
+One-time setup (the first line points the global `maquette` back at main):
+
+```bash
+cd ~/maquette-cli && git checkout main && git pull && npm install && npm link
+cd ~/maquette-cli-test && npm install
+echo "alias mqtb='MAQUETTE_PORT=8788 node ~/maquette-cli-test/src/cli.ts'" >> ~/.zshrc && source ~/.zshrc
+```
+
+Before testing a ticket: `cd ~/maquette-cli-test && git fetch && git checkout <branch> && git pull && npm install`. Then try it in a scratch folder, never inside either checkout: `mkdir -p ~/maquette-try && cd ~/maquette-try && mqtb`. `maquette` (port 8787) and `mqtb` (port 8788) can run at the same time in two folders. `mqtb call …` and `mqtb tools` reach the branch's server, since they read the same `MAQUETTE_PORT`. Both read `~/.maquette/settings.json`; a key only the branch knows is ignored by main with a warning.
+
 `dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 
 ## Not built yet
