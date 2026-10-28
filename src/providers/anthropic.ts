@@ -4,7 +4,7 @@
 // on policy grounds. Claude's replies are kept whole (`native`) and sent back unchanged.
 import Anthropic from "@anthropic-ai/sdk";
 import type { Settings } from "../settings.ts";
-import { type AssistantMessage, type ChatEvent, type ChatRequest, type Message, type ModelInfo, type Provider, ProviderError, safeId, type StopReason, type ToolCallPart } from "./types.ts";
+import { type AssistantMessage, type ChatEvent, type ChatRequest, type Message, type ModelInfo, type Provider, ProviderError, safeId, type StopReason, systemText, type ToolCallPart } from "./types.ts";
 
 type Beta = Anthropic.Beta.Messages.BetaMessageParam;
 type BetaBlock = Anthropic.Beta.Messages.BetaContentBlockParam;
@@ -77,7 +77,8 @@ export class AnthropicProvider implements Provider {
     return {
       model: this.model,
       max_tokens: maxTokens,
-      system: request.system,
+      // Text blocks, with a cache breakpoint after each stable one.
+      ...(systemText(request.system) ? { system: request.system.filter((b) => b.text).map((b) => ({ type: "text" as const, text: b.text, ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}) })) } : {}),
       messages: toAnthropic(request.messages),
       ...(request.tools?.length ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: { type: "object" as const, ...t.inputSchema } })) } : {}),
       // Caches everything up to the last block, so each turn reads the one before from cache.

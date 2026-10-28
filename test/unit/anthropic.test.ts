@@ -24,7 +24,8 @@ test("streams a turn with adaptive thinking, effort, caching, compaction and fal
   const server = await mock((_, res) => sse(res, reply("claude-opus-5-5", [thinking, text("Rendering ", "page one."), toolUse], "tool_use"), true));
   const provider = new AnthropicProvider(undefined, options(server.url));
   const tools = [{ name: "render_page", description: "Renders a page.", inputSchema: { type: "object", properties: { page: { type: "integer" } } } }];
-  const events: ChatEvent[] = await drain(provider.chat({ system: "You are Maquette.", messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }], tools }));
+  const system = [{ name: "core", text: "You are Maquette.", cache: true }, { name: "environment", text: "In /tmp.", cache: true }, { name: "project", text: "No memory yet." }];
+  const events: ChatEvent[] = await drain(provider.chat({ system, messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }], tools }));
 
   const [req] = server.seen;
   assert.equal(req.url, "/v1/messages");
@@ -32,7 +33,12 @@ test("streams a turn with adaptive thinking, effort, caching, compaction and fal
   assert.equal(req.body.model, "claude-opus-5-5");
   assert.equal(req.body.stream, true);
   assert.equal(req.body.max_tokens, 64000);
-  assert.equal(req.body.system, "You are Maquette.");
+  // A text block each, with a cache breakpoint on the stable ones only.
+  assert.deepEqual(req.body.system, [
+    { type: "text", text: "You are Maquette.", cache_control: { type: "ephemeral" } },
+    { type: "text", text: "In /tmp.", cache_control: { type: "ephemeral" } },
+    { type: "text", text: "No memory yet." },
+  ]);
   assert.deepEqual(req.body.thinking, { type: "adaptive" });
   assert.deepEqual(req.body.output_config, { effort: "high" });
   assert.deepEqual(req.body.cache_control, { type: "ephemeral" });
@@ -52,7 +58,7 @@ test("streams a turn with adaptive thinking, effort, caching, compaction and fal
   assert.deepEqual(done.message.parts, [{ type: "text", text: "Rendering page one." }, call]);
 
   // The next turn sends the reply back block for block, thinking signature included.
-  await drain(provider.chat({ system: "You are Maquette.", messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }, done.message, { role: "user", parts: [{ type: "tool_result", id: "toolu_01", name: "render_page", content: [{ type: "text", text: "Rendered." }, { type: "image", mediaType: "image/png", data: "iVBORw0KGgo=" }] }] }] }));
+  await drain(provider.chat({ system: [{ name: "core", text: "You are Maquette." }], messages: [{ role: "user", parts: [{ type: "text", text: "Show me page one" }] }, done.message, { role: "user", parts: [{ type: "tool_result", id: "toolu_01", name: "render_page", content: [{ type: "text", text: "Rendered." }, { type: "image", mediaType: "image/png", data: "iVBORw0KGgo=" }] }] }] }));
   const [, second] = server.seen;
   assert.deepEqual(second.body.messages[1].content, [
     { type: "thinking", thinking: "", signature: "sig123" },
@@ -67,16 +73,16 @@ test("older models get no thinking, effort or compaction; settings can turn fall
   assert.ok(isLegacy("claude-haiku-4-5") && isLegacy("claude-sonnet-4-5-20250929") && isLegacy("claude-3-7-sonnet-latest") && isLegacy("claude-opus-4-1"));
   assert.ok(!isLegacy("claude-opus-5-5") && !isLegacy("claude-sonnet-4-6") && !isLegacy("claude-opus-4-8") && !isLegacy("claude-fable-5-1") && !isLegacy("claude-haiku-5-5"));
   const server = await mock((_, res) => sse(res, reply("claude-haiku-4-5", [text("Hi.")], "end_turn"), true));
-  await drain(new AnthropicProvider("claude-haiku-4-5", options(server.url, { refusalFallback: false })).chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] }));
+  await drain(new AnthropicProvider("claude-haiku-4-5", options(server.url, { refusalFallback: false })).chat({ system: [], messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] }));
   const { body, headers } = server.seen[0];
   assert.equal(headers["anthropic-beta"], undefined);
-  for (const key of ["thinking", "output_config", "context_management", "fallbacks", "tools"]) assert.equal(body[key], undefined, key);
+  for (const key of ["system", "thinking", "output_config", "context_management", "fallbacks", "tools"]) assert.equal(body[key], undefined, key);
   await server.close();
 });
 
 test("a refusal comes back as a stop with its explanation", async () => {
   const server = await mock((_, res) => sse(res, reply("claude-opus-5-5", [text("I can't")], "refusal", { stop_details: { type: "refusal", category: "cyber", explanation: "This looks like malware." } }), true));
-  const events = await drain(new AnthropicProvider(undefined, options(server.url)).chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "…" }] }] }));
+  const events = await drain(new AnthropicProvider(undefined, options(server.url)).chat({ system: [], messages: [{ role: "user", parts: [{ type: "text", text: "…" }] }] }));
   const done = events.at(-1);
   assert.ok(done?.type === "done");
   assert.equal(done.stop, "refusal");
@@ -100,7 +106,7 @@ test("lists models, and explains errors", async () => {
         : json(res, 401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }),
   );
   assert.deepEqual(await new AnthropicProvider(undefined, options(server.url)).models(), [{ id: "claude-opus-5-5", name: "Claude Opus 5.5" }]);
-  const ask = (model?: string) => drain(new AnthropicProvider(model, options(server.url)).chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] }));
+  const ask = (model?: string) => drain(new AnthropicProvider(model, options(server.url)).chat({ system: [], messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] }));
   await assert.rejects(ask("claude-bad-image"), (e: Error) => e.message === "Anthropic refused the request (400): messages.0.content.0.image.source.base64: The image was specified using the image/png media type, but the image appears to be a image/jpeg image");
   await assert.rejects(ask("claude-nope"), /Anthropic has no model "claude-nope" \(404\)/);
   await assert.rejects(ask(), (e: Error) => e instanceof ProviderError && /didn't accept the credentials \(401\)\. Set MAQUETTE_TEST_ANTHROPIC_KEY \(providers.anthropic.apiKeyEnv\)/.test(e.message));
@@ -108,5 +114,5 @@ test("lists models, and explains errors", async () => {
   const nobody = `http://127.0.0.1:${await closedPort()}`;
   const offline = new AnthropicProvider(undefined, options(nobody));
   offline.client.maxRetries = 0;
-  await assert.rejects(drain(offline.chat({ system: "", messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] })), new RegExp(`Can't reach the Claude API at ${nobody}`));
+  await assert.rejects(drain(offline.chat({ system: [], messages: [{ role: "user", parts: [{ type: "text", text: "Hi" }] }] })), new RegExp(`Can't reach the Claude API at ${nobody}`));
 });

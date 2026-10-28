@@ -1,7 +1,7 @@
 // The agent loop, routing and permissions, against the fake provider and a fake server: no
 // screen, no key, no DesignCraft.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import { route } from "../../src/agent/route.ts";
 import { AgentSession } from "../../src/agent/session.ts";
 import { toAnthropic } from "../../src/providers/anthropic.ts";
 import { FakeProvider, type FakeTurn } from "../../src/providers/fake.ts";
-import { type ChatEvent, type ChatRequest, ProviderError, type ToolResultPart } from "../../src/providers/types.ts";
+import { type ChatEvent, type ChatRequest, ProviderError, systemText, type ToolResultPart } from "../../src/providers/types.ts";
 import { fakeServer, settings } from "./fake-server.ts";
 
 function session(turns: FakeTurn[], more: { mode?: "ask" | "auto" | "plan"; answer?: (name: string) => "y" | "n" | "a" } = {}) {
@@ -44,7 +44,7 @@ test("a sentence runs the model's calls through the queue, sends back the result
   assert.equal(results[1].name, "render_page");
   assert.ok(results[1].content.some((c) => c.type === "image" && c.mediaType === "image/png"));
   assert.match((results[1].content[0] as { text: string }).text, /image: .*002-render_page.png/);
-  assert.match(provider.requests[0].system, /Maquette runs in/);
+  assert.match(systemText(provider.requests[0].system), /Maquette runs in/);
   assert.equal(provider.requests[0].tools?.length, 5);
   assert.equal(s.history.length, 4);
   assert.equal(s.busy, false);
@@ -106,7 +106,7 @@ test("auto mode never asks; plan mode offers only reading tools and refuses a ch
   const plan = session([{ calls: [{ name: "inspect_document", input: {} }, { name: "chart_create", input: { frame: "slot:01", spec: {} } }] }, { text: "Here is the plan." }], { mode: "plan" });
   await plan.s.submit("make the chart");
   assert.deepEqual(plan.provider.requests[0].tools?.map((t) => t.name), ["inspect_document", "render_page"]);
-  assert.match(plan.provider.requests[0].system, /Plan mode/);
+  assert.match(systemText(plan.provider.requests[0].system), /Plan mode/);
   assert.deepEqual(plan.server.calls.map((c) => c.tool), ["inspect_document"]);
   const refused = plan.provider.requests[1].messages.at(-1)!.parts[1] as ToolResultPart;
   assert.match((refused.content[0] as { text: string }).text, /Plan mode/);
@@ -190,7 +190,7 @@ test("a model that can't call tools falls back to `maquette call` lines, which a
   assert.equal(s.textProtocol, true);
   assert.ok(names(events, "notice").some((e) => /can't call tools/.test((e as { text: string }).text)));
   assert.equal(provider.requests[0].tools, undefined);
-  assert.match(provider.requests[0].system, /maquette call <tool> --flag value/);
+  assert.match(systemText(provider.requests[0].system), /maquette call <tool> --flag value/);
   assert.deepEqual(names(events, "ask_permission").map((e) => (e as { name: string }).name), ["render_page"], "the text protocol always asks, even for a render");
   assert.deepEqual(server.calls.map((c) => c.tool), ["render_page"]);
   const back = provider.requests[1].messages.at(-1)!;
@@ -236,18 +236,65 @@ test("MAQUETTE.md in the folder goes into the model's instructions; /init is a s
   assert.equal(server.calls.length, 0);
   assert.ok(!existsSync(join(server.root, "MAQUETTE.md")));
   await s.submit("hello");
-  assert.doesNotMatch(provider.requests[0].system, /Instructions from the project's MAQUETTE\.md/);
+  assert.doesNotMatch(systemText(provider.requests[0].system), /MAQUETTE\.md, as the person keeps it/);
 
   writeFileSync(join(server.root, "MAQUETTE.md"), "# Annual report\nVoice: plain and warm. Palette: process inks.\n");
   await s.submit("/init");
   assert.match((names(events, "notice").at(-1) as { text: string }).text, /MAQUETTE\.md exists/);
   assert.equal(server.calls.length, 0);
   await s.submit("again");
-  assert.match(provider.requests[1].system, /Instructions from the project's MAQUETTE\.md:\n\n# Annual report\nVoice: plain and warm\. Palette: process inks\./);
+  assert.match(systemText(provider.requests[1].system), /MAQUETTE\.md, as the person keeps it:\n~~~markdown\n# Annual report\nVoice: plain and warm\. Palette: process inks\.\n~~~$/);
 
   // Without vision, the stub says /init will need it.
   const blind = session([]);
   Object.defineProperty(blind.provider, "vision", { value: false });
   await blind.s.submit("/init");
   assert.match((names(blind.events, "output").at(-1) as { text: string }).text, /need a model with vision/);
+});
+
+test("the instructions are three blocks: the same core everywhere, the session's environment, and the project last and uncached", async () => {
+  const a = session([{ text: "ok" }]);
+  const b = session([{ text: "ok" }], { mode: "plan" });
+  writeFileSync(join(b.server.root, "MAQUETTE.md"), "Charts use the Chart styles only.\n");
+  await a.s.submit("hello");
+  await b.s.submit("hello");
+  const [first, second] = [a.provider.requests[0].system, b.provider.requests[0].system];
+  assert.deepEqual(first.map((x) => [x.name, Boolean(x.cache)]), [["core", true], ["environment", true], ["project", false]]);
+  assert.deepEqual(second.map((x) => x.name), ["core", "environment", "project"]);
+  assert.equal(first[0].text, second[0].text, "the core is the same in two folders");
+  assert.notEqual(a.server.root, b.server.root);
+  assert.match(first[1].text, new RegExp(`Maquette runs DesignCraft headless in ${a.server.root}`));
+  assert.match(first[1].text, /The engine's instructions:\n\nStub instructions\./);
+  assert.doesNotMatch(first[1].text, /Plan mode/);
+  assert.match(second[1].text, /Plan mode/);
+  assert.match(first[2].text, /no design memory yet.*\/init/s);
+  assert.doesNotMatch(first[2].text, /Follow it over your own defaults/);
+  assert.match(second[2].text, /Follow it over your own defaults/);
+  assert.match(second[2].text, /Charts use the Chart styles only\./);
+  assert.doesNotMatch(first[0].text, /\/tmp|maquette-agent-/, "nothing about the session in the core");
+});
+
+test("MAQUETTE.md edited or removed between turns: the model gets the new text, the screen a notice, the message a line in front", async () => {
+  const { s, server, provider, events } = session([{ text: "ok" }, { text: "ok" }, { text: "ok" }, { text: "ok" }]);
+  const file = join(server.root, "MAQUETTE.md");
+  writeFileSync(file, "Palette: emphasis is Brand Red.\n");
+  await s.submit("first");
+  assert.equal(names(events, "notice").length, 0, "the first turn never says it changed");
+  assert.equal(provider.requests[0].messages[0].parts.length, 1);
+  await s.submit("second");
+  assert.equal(names(events, "notice").length, 0, "unchanged, so nothing to say");
+  writeFileSync(file, "Palette: emphasis is Brand Teal.\n");
+  await s.submit("third");
+  assert.match(provider.requests[2].system.at(-1)!.text, /Brand Teal/);
+  assert.equal((names(events, "notice").at(-1) as { text: string }).text, "MAQUETTE.md changed; the model has the new version.");
+  const third = provider.requests[2].messages.at(-1)!.parts as { text: string }[];
+  assert.equal(third[0].text, "MAQUETTE.md changed since your last turn; the new version is in your instructions.");
+  assert.equal(third[1].text, "third");
+  rmSync(file);
+  await s.submit("fourth");
+  assert.match(provider.requests[3].system.at(-1)!.text, /no design memory yet/);
+  assert.match((names(events, "notice").at(-1) as { text: string }).text, /MAQUETTE\.md was removed/);
+  assert.match((provider.requests[3].messages.at(-1)!.parts[0] as { text: string }).text, /removed since your last turn/);
+  assert.equal(names(events, "user").length, 4);
+  assert.equal((names(events, "user").at(-1) as { text: string }).text, "fourth", "the transcript shows what the person typed");
 });

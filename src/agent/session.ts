@@ -7,7 +7,7 @@ import { relative } from "node:path";
 import { catalogue, describe, gist, parseCall, type Tool, words, toArgs } from "../args.ts";
 import { imageType } from "../images.ts";
 import { createProvider, defaultModels } from "../providers/index.ts";
-import { type ImagePart, type Message, type Provider, ProviderError, type TextPart, textOf, type ToolCallPart, type ToolResultPart, type ToolSpec, type Usage } from "../providers/types.ts";
+import { type ImagePart, type Message, type Provider, ProviderError, type SystemBlock, type TextPart, textOf, type ToolCallPart, type ToolResultPart, type ToolSpec, type Usage } from "../providers/types.ts";
 import type { Reply, Source } from "../server.ts";
 import { providerNames, type Settings, write } from "../settings.ts";
 import { dollars, price } from "./cost.ts";
@@ -88,6 +88,10 @@ export class AgentSession {
   #pendingAnswer?: (answer: PermissionAnswer) => void;
   #chain: Promise<unknown> = Promise.resolve();
   #copyExample?: (root: string) => string;
+  // MAQUETTE.md as read for this turn, and as the model last had it (unset before the first
+  // turn of a conversation), so a change between turns can be pointed out.
+  #project: string | undefined;
+  #sentProject?: { text: string | undefined };
 
   constructor(options: SessionOptions) {
     this.server = options.server;
@@ -215,6 +219,7 @@ export class AgentSession {
     if (name === "clear") {
       this.history = [];
       this.textProtocol = false;
+      this.#sentProject = undefined;
       this.notice("New conversation. The totals in /cost are kept.");
       return this.sendStatus();
     }
@@ -290,8 +295,20 @@ export class AgentSession {
     return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema as Record<string, unknown> }));
   }
 
-  system(): string {
-    return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol });
+  system(): SystemBlock[] {
+    return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol, project: this.#project });
+  }
+
+  // Reads MAQUETTE.md for this turn. A change since the model last had it, deletion included,
+  // gets a notice on the screen and a line in front of the person's message: a system block
+  // that changes silently in turn forty is easy to miss.
+  readProject(): TextPart[] {
+    this.#project = projectInstructions(this.server.root);
+    const before = this.#sentProject;
+    this.#sentProject = { text: this.#project };
+    if (!before || before.text === this.#project) return [];
+    this.notice(this.#project === undefined ? "MAQUETTE.md was removed; the model no longer has it." : "MAQUETTE.md changed; the model has the new version.");
+    return [{ type: "text", text: this.#project === undefined ? "MAQUETTE.md was removed since your last turn; this project has no design memory now." : "MAQUETTE.md changed since your last turn; the new version is in your instructions." }];
   }
 
   account(model: string, usage?: Usage) {
@@ -312,7 +329,7 @@ export class AgentSession {
   // A sentence for the model: the loop of asking, running its calls and sending back the
   // results, until it answers without calling anything.
   async turn(text: string) {
-    this.history.push({ role: "user", parts: [{ type: "text", text }] });
+    this.history.push({ role: "user", parts: [...this.readProject(), { type: "text", text }] });
     this.emit({ type: "user", text });
     this.busy = true;
     this.#interrupted = false;

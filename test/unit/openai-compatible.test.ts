@@ -26,7 +26,7 @@ test("streams text, then tool calls whose arguments arrive in pieces", async () 
   process.env.MAQUETTE_TEST_OPENAI_KEY = "secret";
   const provider = new OpenAICompatibleProvider("llama3.1:8b", options(`${server.url}/v1/`));
   const tools = [{ name: "open_document", description: "Opens a document.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }];
-  const events: ChatEvent[] = await drain(provider.chat({ system: "Be brief.", messages: [{ role: "user", parts: [{ type: "text", text: "Open the example" }] }], tools }));
+  const events: ChatEvent[] = await drain(provider.chat({ system: [{ name: "core", text: "Be brief.", cache: true }, { name: "project", text: "Plain words." }], messages: [{ role: "user", parts: [{ type: "text", text: "Open the example" }] }], tools }));
   delete process.env.MAQUETTE_TEST_OPENAI_KEY;
   await server.close();
 
@@ -35,7 +35,7 @@ test("streams text, then tool calls whose arguments arrive in pieces", async () 
   assert.equal(req.headers.authorization, "Bearer secret");
   assert.equal(req.body.model, "llama3.1:8b");
   assert.equal(req.body.stream, true);
-  assert.deepEqual(req.body.messages, [{ role: "system", content: "Be brief." }, { role: "user", content: "Open the example" }]);
+  assert.deepEqual(req.body.messages, [{ role: "system", content: "Be brief.\n\nPlain words." }, { role: "user", content: "Open the example" }]);
   assert.deepEqual(req.body.tools, [{ type: "function", function: { name: "open_document", description: "Opens a document.", parameters: tools[0].inputSchema } }]);
 
   assert.deepEqual(events.filter((e) => e.type === "text").map((e) => e.text), ["Opening ", "it."]);
@@ -54,7 +54,7 @@ test("streams text, then tool calls whose arguments arrive in pieces", async () 
 
 test("arguments that aren't JSON become a call with an error, not a crash", async () => {
   const server = await mock((_, res) => sse(res, [chunk({ tool_calls: [{ index: 0, id: "c", function: { name: "render_page", arguments: "{page: 0" } }] }, "tool_calls"), "[DONE]"]));
-  const events = await drain(new OpenAICompatibleProvider("m", options(server.url)).chat({ system: "", messages: [] }));
+  const events = await drain(new OpenAICompatibleProvider("m", options(server.url)).chat({ system: [], messages: [] }));
   await server.close();
   const call = events.find((e) => e.type === "tool_call");
   assert.ok(call?.type === "tool_call" && call.call.error?.startsWith("The arguments weren't a JSON object"));
@@ -85,7 +85,7 @@ test("arguments sent as a whole object replace, rather than add to, what came be
       "[DONE]",
     ]),
   );
-  const events = await drain(new OpenAICompatibleProvider("m", options(server.url)).chat({ system: "", messages: [] }));
+  const events = await drain(new OpenAICompatibleProvider("m", options(server.url)).chat({ system: [], messages: [] }));
   await server.close();
   const call = events.find((e) => e.type === "tool_call");
   assert.ok(call?.type === "tool_call");
@@ -101,9 +101,9 @@ test("lists models from /models, leaving out entries without an id", async () =>
 });
 
 test("failures say what to do", async () => {
-  await assert.rejects(drain(new OpenAICompatibleProvider(undefined, options("http://127.0.0.1:9")).chat({ system: "", messages: [] })), /No model is set/);
+  await assert.rejects(drain(new OpenAICompatibleProvider(undefined, options("http://127.0.0.1:9")).chat({ system: [], messages: [] })), /No model is set/);
   const nobody = `http://127.0.0.1:${await closedPort()}`;
-  await assert.rejects(drain(new OpenAICompatibleProvider("m", options(nobody)).chat({ system: "", messages: [] })), (e: Error) => e instanceof ProviderError && e.message.startsWith(`Nothing is answering at ${nobody}.`));
+  await assert.rejects(drain(new OpenAICompatibleProvider("m", options(nobody)).chat({ system: [], messages: [] })), (e: Error) => e instanceof ProviderError && e.message.startsWith(`Nothing is answering at ${nobody}.`));
   const server = await mock((s, res) =>
     s.body?.model === "gemma"
       ? json(res, 400, { error: { message: "registry.ollama.ai/library/gemma does not support tools" } })
@@ -111,7 +111,7 @@ test("failures say what to do", async () => {
         ? json(res, 404, { error: { message: 'model "nope" not found, try pulling it first' } })
         : json(res, 401, { error: { message: "Invalid API key" } }),
   );
-  const run = (model: string) => drain(new OpenAICompatibleProvider(model, options(server.url)).chat({ system: "", messages: [] }));
+  const run = (model: string) => drain(new OpenAICompatibleProvider(model, options(server.url)).chat({ system: [], messages: [] }));
   await assert.rejects(run("gemma"), /gemma can't call tools, which Maquette needs/);
   await assert.rejects(run("nope"), /has no model "nope" \(404\)/);
   await assert.rejects(run("other"), /didn't accept the key \(401\): Invalid API key\. Set MAQUETTE_TEST_OPENAI_KEY/);

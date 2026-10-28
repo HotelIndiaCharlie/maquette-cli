@@ -2,7 +2,7 @@
 // log lines, and never loads Ink.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -68,4 +68,20 @@ test("a second maquette on the same port says so and exits", async () => {
   assert.match(err, /already running on port/);
   first.child.kill("SIGTERM");
   await first.exited;
+});
+
+test("GET /tools carries the project's MAQUETTE.md, read on each request, and maquette tools prints it", async () => {
+  const m = await start();
+  const tools = async () => (await fetch(`http://127.0.0.1:${m.port}/tools`)).json();
+  assert.equal((await tools()).project, null);
+  writeFileSync(join(m.cwd, "MAQUETTE.md"), "# Report\nCharts use the Chart styles only.\n");
+  assert.equal((await tools()).project, "# Report\nCharts use the Chart styles only.");
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(MAQUETTE_|OPENAI_|ANTHROPIC_|DESIGNCRAFT_)/.test(k)));
+  const listing = spawn(process.execPath, [cli, "tools"], { cwd: tmpdir(), env: { ...clean, HOME: tmpdir(), NO_COLOR: "1", MAQUETTE_PORT: String(m.port) }, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  listing.stdout.on("data", (d) => (out += d));
+  assert.equal(await new Promise((done) => listing.on("close", done)), 0);
+  assert.match(out, /Stub engine: nothing is really drawn\.\n\nThe project's MAQUETTE\.md:\n\n# Report\nCharts use the Chart styles only\.\n\n/);
+  m.child.kill("SIGTERM");
+  await m.exited;
 });
