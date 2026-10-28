@@ -98,7 +98,7 @@ What you type decides what happens:
 | A sentence | Goes to the model, which calls tools until the job is done. Each call gets a line: `✓` or `✗`, the tool, its arguments, how long it took, any render's path. |
 | `<tool> …` | Calls a tool yourself, with its arguments as flags (below), with no model in the way. The model is told what you ran. |
 | `!<command>` | Runs a shell command in Maquette's folder. Its output shows and stays in the conversation, so you can ask about it. |
-| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools` |
+| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools`, and `/init` (coming: for now it says what it will do) |
 | `tools`, `help`, `help <tool>` | The tools one line each; how to type calls; one tool's description and flags. `help chart_create` gives the whole chart spec format. |
 | `example` | Copies the example report into `./example/` |
 | `open` | Opens the last image in Preview |
@@ -111,7 +111,7 @@ What you type decides what happens:
 - **The screen** is drawn with [Ink](https://github.com/vadimdemedes/ink), like Claude Code's: finished output scrolls up above, the answer streams in with its Markdown, and the input box and the footer (model, effort, permission mode, tokens and, for Claude, dollars) stay at the bottom. When Maquette has no terminal, as under a script or `maquette < /dev/null`, it runs the server alone and prints one plain log line per call, as before.
 - **Other sessions:** their calls appear in the transcript marked `http`, in the order they ran between the model's own.
 - **Renders go back to the model** as images, so a model that can see looks at its own work.
-- **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions, like `CLAUDE.md`.
+- **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions on every turn, like `CLAUDE.md`. It's the project's design memory: purpose and audience, voice, look and feel, conventions and decisions, kept short. `/init` will write it from a survey of the document; until then, write it by hand.
 - **Local models that can't call tools** fall back to a text protocol: the model writes `maquette call …` lines, Maquette asks before running each and sends back the results. The footer then says `text calls`.
 - **Save before you stop:** the document lives only in DesignCraft until `save_document`.
 - **One at a time:** a second `maquette` on the same port says which folder the first one is working in, and exits. Pick another port with `--port`.

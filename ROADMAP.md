@@ -107,7 +107,8 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 
 ### Phase 5: Skills and project instructions
 
-- `MAQUETTE.md` in the project folder (and `~/.maquette/MAQUETTE.md`) is read into the system prompt, like `CLAUDE.md`.
+- `MAQUETTE.md` in the project folder is read into the system prompt, like `CLAUDE.md`. It is project-level only: the design memory of one document, kept next to it. There is no user-level file.
+- `/init` writes it. It surveys the open document (inspect, every page rendered, the stories' text), asks two or three questions (what the document is for and who reads it, what the agent may change, whether a house style exists), and writes `MAQUETTE.md` as design memory, not inventory: purpose and audience, voice, visual identity by role (palette, type, grid, imagery), conventions, decisions stated and inferred (inferred ones marked so the person can confirm or strike them), do and don't. On a rerun it proposes changes rather than rewriting. Facts with bounds and item IDs stay out; the agent gets those from `inspect_document`. The survey step is a coarse tool, `document_survey`, built as a tool module; the writing step is a bundled skill. Phase 2 ships `/init` as a stub that says what it will do (HOT-58); the real one is HOT-59.
 - Skills live in `.maquette/skills/<name>/SKILL.md` and `~/.maquette/skills/`, with the same frontmatter as Claude Code's (`name`, `description`). `.claude/skills/` is read too, so one skill folder serves both tools. Only name and description go into the system prompt; the body is loaded when the model invokes a skill (through a `skill` tool) or you type `/<name>`.
 - Maquette ships with a few: `chart` (how to go from a CSV and a sentence to a placed chart with the spec format), `report-review` (render every page, look at each, list layout problems), `designcraft` (the engine's conventions).
 - `/skills` lists them; `maquette skills` from outside.

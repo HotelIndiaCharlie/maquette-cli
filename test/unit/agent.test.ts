@@ -1,7 +1,7 @@
 // The agent loop, routing and permissions, against the fake provider and a fake server: no
 // screen, no key, no DesignCraft.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -224,4 +224,30 @@ test("/permissions persists to the project file, /model and /provider switch, /c
   await s.submit("/help");
   assert.match((names(events, "output").at(-1) as { text: string }).text, /\/permissions/);
   assert.ok(!existsSync(join(projectFile, "..", "nothing")));
+});
+
+test("MAQUETTE.md in the folder goes into the model's instructions; /init is a stub that touches nothing", async () => {
+  const { s, server, provider, events } = session([{ text: "ok" }, { text: "ok" }]);
+  await s.submit("/init");
+  const stub = names(events, "output").at(-1) as { text: string };
+  assert.match(stub.text, /MAQUETTE\.md/);
+  assert.match(stub.text, /isn't built yet/);
+  assert.doesNotMatch(stub.text, /vision/, "the fake provider can see");
+  assert.equal(server.calls.length, 0);
+  assert.ok(!existsSync(join(server.root, "MAQUETTE.md")));
+  await s.submit("hello");
+  assert.doesNotMatch(provider.requests[0].system, /Instructions from the project's MAQUETTE\.md/);
+
+  writeFileSync(join(server.root, "MAQUETTE.md"), "# Annual report\nVoice: plain and warm. Palette: process inks.\n");
+  await s.submit("/init");
+  assert.match((names(events, "notice").at(-1) as { text: string }).text, /MAQUETTE\.md exists/);
+  assert.equal(server.calls.length, 0);
+  await s.submit("again");
+  assert.match(provider.requests[1].system, /Instructions from the project's MAQUETTE\.md:\n\n# Annual report\nVoice: plain and warm\. Palette: process inks\./);
+
+  // Without vision, the stub says /init will need it.
+  const blind = session([]);
+  Object.defineProperty(blind.provider, "vision", { value: false });
+  await blind.s.submit("/init");
+  assert.match((names(blind.events, "output").at(-1) as { text: string }).text, /need a model with vision/);
 });

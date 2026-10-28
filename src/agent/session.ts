@@ -13,7 +13,7 @@ import { providerNames, type Settings, write } from "../settings.ts";
 import { dollars, price } from "./cost.ts";
 import type { AgentEvent, Choice, PermissionAnswer, Status } from "./events.ts";
 import { decide, type Mode, modeHelp, modes } from "./permissions.ts";
-import { systemPrompt } from "./prompt.ts";
+import { projectInstructions, systemPrompt } from "./prompt.ts";
 import { type Route, route, slashCommands } from "./route.ts";
 import { runShell } from "./shell.ts";
 
@@ -60,7 +60,16 @@ const slashHelp = `  /help                 this list
   /permissions [mode]   ${modes.map((m) => `${m}: ${modeHelp[m]}`).join("; ")}
   /clear                start a new conversation (the totals in /cost are kept)
   /cost                 tokens and, when the price is known, dollars this session
-  /tools                the tools, one line each`;
+  /tools                the tools, one line each
+  /init                 survey the document and write MAQUETTE.md (coming: for now, says what it will do)`;
+
+// What /init says until it's built. The real /init replaces this constant.
+const initStub = `/init isn't built yet. When it is, it will survey the open document, render its pages, ask what
+the document is for and what may change, and write MAQUETTE.md: the project's design memory,
+read into the model's instructions on every turn.
+Until then, write MAQUETTE.md by hand in this folder, short: purpose and audience, voice, palette
+and type by role, conventions, decisions, do and don't.`;
+const initNeedsVision = "/init will need a model with vision to describe the look and feel; this one can't see images.";
 
 export class AgentSession {
   server: ServerLike;
@@ -249,6 +258,10 @@ export class AgentSession {
       // The model named in the settings belongs to the provider it was set for, so the new
       // provider starts on its own default.
       return this.switchProvider({ ...settings, provider: args as Settings["provider"], model: defaultModels[args as Settings["provider"]] });
+    }
+    if (name === "init") {
+      if (projectInstructions(this.server.root) !== undefined) return this.notice("MAQUETTE.md exists. /init will update it in a later release; edit it by hand for now.");
+      return this.emit({ type: "output", text: this.provider.vision ? initStub : `${initStub}\n${initNeedsVision}` });
     }
     this.notice(`There's no /${name}. The slash commands are ${slashCommands.join(", ")}.`, "warn");
   }

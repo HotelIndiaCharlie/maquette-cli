@@ -117,3 +117,9 @@ test("failures say what to do", async () => {
   await assert.rejects(run("other"), /didn't accept the key \(401\): Invalid API key\. Set MAQUETTE_TEST_OPENAI_KEY/);
   await server.close();
 });
+
+test("vision follows the setting, so the session knows whether the model can see", () => {
+  const base = { baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "OPENAI_API_KEY" };
+  assert.equal(new OpenAICompatibleProvider("m", { ...base, vision: true }).vision, true);
+  assert.equal(new OpenAICompatibleProvider("m", { ...base, vision: false }).vision, false);
+});

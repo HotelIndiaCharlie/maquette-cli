@@ -35,6 +35,7 @@ export type ModelInfo = { id: string; name?: string };
 export interface Provider {
   readonly name: string;
   readonly model: string;
+  readonly vision: boolean; // whether the model can look at images, such as renders
   chat(request: ChatRequest): AsyncIterable<ChatEvent>;
   models(): Promise<ModelInfo[]>;
 }

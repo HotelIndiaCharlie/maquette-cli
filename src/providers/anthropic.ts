@@ -46,6 +46,7 @@ export function toAnthropic(messages: Message[]): Beta[] {
 export class AnthropicProvider implements Provider {
   readonly name = "anthropic";
   readonly model: string;
+  readonly vision = true;
   options: Options;
   #client?: Anthropic;
 
