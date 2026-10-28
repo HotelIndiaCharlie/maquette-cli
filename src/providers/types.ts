@@ -17,7 +17,14 @@ export type AssistantMessage = { role: "assistant"; parts: (TextPart | ToolCallP
 export type Message = UserMessage | AssistantMessage;
 
 export type ToolSpec = { name: string; description?: string; inputSchema: Record<string, unknown> };
-export type ChatRequest = { system: string; messages: Message[]; tools?: ToolSpec[]; signal?: AbortSignal };
+// The instructions, as named blocks in order: Maquette's core, the session's environment, the
+// project's MAQUETTE.md. A block marked `cache` is a prompt-cache breakpoint where the provider
+// has them, so the stable blocks before a change are read from cache.
+export type SystemBlock = { name: string; text: string; cache?: boolean };
+export type ChatRequest = { system: SystemBlock[]; messages: Message[]; tools?: ToolSpec[]; signal?: AbortSignal };
+
+// The blocks as one string, for providers and tests that want one.
+export const systemText = (blocks: SystemBlock[]) => blocks.map((b) => b.text).filter(Boolean).join("\n\n");
 
 export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
 // end: the model finished; tool_use: it wants its tool calls run; max_tokens: it was cut off;

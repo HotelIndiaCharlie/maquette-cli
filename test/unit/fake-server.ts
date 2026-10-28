@@ -43,7 +43,7 @@ export function fakeServer(root = realpathSync(mkdtempSync(join(tmpdir(), "maque
         reply.images.push(path);
         last = path;
         reply.text = tool === "render_page" ? `Rendered page ${args.page}.` : `Chart drawn in ${args.frame}.`;
-      } else if (tool === "open_document") reply.text = `Opened ${args.path}.`;
+      } else if (tool === "open_document") reply.text = String(args.path).endsWith(".idml") ? JSON.stringify({ index: 0, documentFonts: 0, warnings: ["Missing link: Links/cover.tif", "Font Akzidenz Bold isn't installed"] }) : `Opened ${args.path}.`;
       else if (tool === "inspect_document") reply.text = '{"pages":5}';
       else if (tool === "save_document") reply.text = "Saved.";
       else {

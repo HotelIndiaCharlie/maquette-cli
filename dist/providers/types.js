@@ -3,6 +3,8 @@
 // Messages are kept in this neutral form so a conversation can move between providers;
 // a provider's own reply is also kept as it came (`native`) and sent back to that provider
 // unchanged, so nothing it relies on, such as thinking or compaction blocks, is lost.
+// The blocks as one string, for providers and tests that want one.
+export const systemText = (blocks) => blocks.map((b) => b.text).filter(Boolean).join("\n\n");
 // A failure worth showing as is: no key, no such model, nothing listening at the address.
 export class ProviderError extends Error {
 }

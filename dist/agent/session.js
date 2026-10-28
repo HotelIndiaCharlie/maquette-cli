@@ -2,9 +2,11 @@
 // and the provider; `submit` takes a typed line and does what it means, emitting events for
 // whoever draws them. Model tool calls go through the server's queue like every other call.
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { relative } from "node:path";
-import { catalogue, describe, gist, parseCall, words, toArgs } from "../args.js";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { catalogue, describe, gist, parseCall, tilde, words, toArgs } from "../args.js";
 import { imageType } from "../images.js";
 import { createProvider, defaultModels } from "../providers/index.js";
 import { ProviderError, textOf } from "../providers/types.js";
@@ -39,14 +41,26 @@ const slashHelp = `  /help                 this list
   /clear                start a new conversation (the totals in /cost are kept)
   /cost                 tokens and, when the price is known, dollars this session
   /tools                the tools, one line each
-  /init                 survey the document and write MAQUETTE.md (coming: for now, says what it will do)`;
-// What /init says until it's built. The real /init replaces this constant.
-const initStub = `/init isn't built yet. When it is, it will survey the open document, render its pages, ask what
-the document is for and what may change, and write MAQUETTE.md: the project's design memory,
-read into the model's instructions on every turn.
-Until then, write MAQUETTE.md by hand in this folder, short: purpose and audience, voice, palette
-and type by role, conventions, decisions, do and don't.`;
-const initNeedsVision = "/init will need a model with vision to describe the look and feel; this one can't see images.";
+  /init [note]          survey the document, ask a few questions and write MAQUETTE.md, the design
+                        memory; on an existing one, propose changes. A note goes to the model with it`;
+// The /init skill: a house version in the project's or the person's .maquette/skills/init/
+// replaces the one Maquette ships. Returns its body, without the frontmatter.
+export function initSkill(root, home = homedir()) {
+    const bundled = fileURLToPath(new URL("../../skills/init/SKILL.md", import.meta.url));
+    const from = [join(root, ".maquette", "skills", "init", "SKILL.md"), join(home, ".maquette", "skills", "init", "SKILL.md")].find((f) => existsSync(f)) ?? bundled;
+    return { text: readFileSync(from, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "").trim(), from, bundled: from === bundled };
+}
+// The warnings in an open_document reply, which DesignCraft gives as JSON: its own from this
+// open, and those Maquette recorded beside the document when it was saved.
+export function openWarnings(text) {
+    try {
+        const { warnings, recordedWarnings } = JSON.parse(text);
+        return [warnings, recordedWarnings].flatMap((w) => (Array.isArray(w) ? w.map(String) : []));
+    }
+    catch {
+        return [];
+    }
+}
 export class AgentSession {
     server;
     settings;
@@ -64,6 +78,10 @@ export class AgentSession {
     #pendingAnswer;
     #chain = Promise.resolve();
     #copyExample;
+    // MAQUETTE.md as read for this turn, and as the model last had it (unset before the first
+    // turn of a conversation), so a change between turns can be pointed out.
+    #project;
+    #sentProject;
     constructor(options) {
         this.server = options.server;
         this.settings = options.settings;
@@ -162,6 +180,7 @@ export class AgentSession {
         try {
             const reply = await this.server.enqueue(name, args, "prompt");
             this.emit({ type: "output", text: reply.text, ok: reply.ok, images: reply.images });
+            this.warnOnOpen(name, reply);
             const seen = `The person ran \`${name} ${rest.trim()}\` at the prompt; it ${reply.ok ? "returned" : "failed with"}: ${gist(reply.text, 2000)}${reply.images.map((p) => `\nimage: ${p}`).join("")}`;
             this.history.push({ role: "user", parts: [{ type: "text", text: seen }] });
         }
@@ -193,6 +212,7 @@ export class AgentSession {
         if (name === "clear") {
             this.history = [];
             this.textProtocol = false;
+            this.#sentProject = undefined;
             this.notice("New conversation. The totals in /cost are kept.");
             return this.sendStatus();
         }
@@ -248,12 +268,37 @@ export class AgentSession {
             // provider starts on its own default.
             return this.switchProvider({ ...settings, provider: args, model: defaultModels[args] });
         }
-        if (name === "init") {
-            if (projectInstructions(this.server.root) !== undefined)
-                return this.notice("MAQUETTE.md exists. /init will update it in a later release; edit it by hand for now.");
-            return this.emit({ type: "output", text: this.provider.vision ? initStub : `${initStub}\n${initNeedsVision}` });
-        }
+        if (name === "init")
+            return this.init(args);
         this.notice(`There's no /${name}. The slash commands are ${slashCommands.join(", ")}.`, "warn");
+    }
+    // /init: the skill goes to the model as this turn's message, with what it needs to know about
+    // the folder; the model surveys, asks, and writes MAQUETTE.md with memory_write.
+    async init(note) {
+        const skill = initSkill(this.server.root);
+        const rerun = projectInstructions(this.server.root) !== undefined;
+        if (!this.provider.vision)
+            this.notice(`${this.provider.model} can't see images, so /init works from the styles, labels and text alone; the result is text-only and weaker. A model with vision does better.`, "warn");
+        const context = [
+            rerun ? "MAQUETTE.md exists, so this is a rerun: propose changes, never rewrite the person's words. Its current text is in your instructions." : "There's no MAQUETTE.md yet.",
+            this.provider.vision ? "" : "This model can't see images: work from the text and structure, and say the result is text-only.",
+            this.mode === "plan" ? "Plan mode is on, so you can survey and ask but not write; end with what you would write." : "",
+            note ? `The person added: ${note}` : "",
+        ].filter(Boolean);
+        if (!skill.bundled)
+            this.notice(`/init follows ${tilde(skill.from)}, in place of Maquette's own.`);
+        return this.turn(`The person typed /init. Follow these instructions.\n\n${skill.text}\n\n${context.join("\n")}`, `/init${note ? ` ${note}` : ""}`);
+    }
+    // Opening a document can warn about missing links and fonts, or what converting from InDesign
+    // lost. The person hears it once, at open; the engine keeps the list beside the document.
+    warnOnOpen(tool, reply) {
+        if (tool !== "open_document" || !reply.ok)
+            return;
+        const w = openWarnings(reply.text);
+        if (!w.length)
+            return;
+        const first = w.slice(0, 3).map((x) => gist(x, 120)).join("; ");
+        this.notice(`Opened with ${w.length} warning${w.length === 1 ? "" : "s"}: ${first}${w.length > 3 ? `; and ${w.length - 3} more` : ""}. They're kept beside the document when it's saved.`, "warn");
     }
     // A list to pick from. The screen answers it; with no screen listening, the first option
     // that is current stays and nothing changes.
@@ -279,7 +324,19 @@ export class AgentSession {
         return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
     }
     system() {
-        return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol });
+        return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol, project: this.#project });
+    }
+    // Reads MAQUETTE.md for this turn. A change since the model last had it, deletion included,
+    // gets a notice on the screen and a line in front of the person's message: a system block
+    // that changes silently in turn forty is easy to miss.
+    readProject() {
+        this.#project = projectInstructions(this.server.root);
+        const before = this.#sentProject;
+        this.#sentProject = { text: this.#project };
+        if (!before || before.text === this.#project)
+            return [];
+        this.notice(this.#project === undefined ? "MAQUETTE.md was removed; the model no longer has it." : "MAQUETTE.md changed; the model has the new version.");
+        return [{ type: "text", text: this.#project === undefined ? "MAQUETTE.md was removed since your last turn; this project has no design memory now." : "MAQUETTE.md changed since your last turn; the new version is in your instructions." }];
     }
     account(model, usage) {
         const t = this.totals;
@@ -298,9 +355,10 @@ export class AgentSession {
     }
     // A sentence for the model: the loop of asking, running its calls and sending back the
     // results, until it answers without calling anything.
-    async turn(text) {
-        this.history.push({ role: "user", parts: [{ type: "text", text }] });
-        this.emit({ type: "user", text });
+    // `shown` is what the transcript shows for it, when that isn't the text itself.
+    async turn(text, shown = text) {
+        this.history.push({ role: "user", parts: [...this.readProject(), { type: "text", text }] });
+        this.emit({ type: "user", text: shown });
         this.busy = true;
         this.#interrupted = false;
         this.#abort = new AbortController();
@@ -447,6 +505,7 @@ export class AgentSession {
             }
             const reply = await this.server.enqueue(call.name, call.input, "model");
             this.emit({ type: "tool_result", id: call.id, name: call.name, ok: reply.ok, text: reply.text, images: reply.images, ms: reply.ms });
+            this.warnOnOpen(call.name, reply);
             const content = [{ type: "text", text: `${reply.text}${reply.images.map((p) => `\nimage: ${p}`).join("")}` || "(no output)" }];
             for (const path of reply.images) {
                 try {

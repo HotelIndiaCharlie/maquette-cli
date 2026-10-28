@@ -16,6 +16,7 @@ import { catalogue, clock, describe, gist, paint, shortPath, tilde, toArgs } fro
 import { bannerText } from "./banner.js";
 import { imageType } from "./images.js";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.js";
+import { projectRule } from "./agent/prompt.js";
 import { createProvider, defaultModels } from "./providers/index.js";
 import { startServer } from "./server.js";
 import { defaults, ensure, load, parse, schema, SettingsError, write } from "./settings.js";
@@ -235,13 +236,14 @@ async function call(name, tokens) {
     process.exitCode = r.ok ? 0 : 1;
 }
 async function listTools(name) {
-    const { instructions, tools, root } = await request("/tools");
+    const { instructions, project, tools, root } = await request("/tools");
     const tool = name === undefined ? undefined : tools.find((t) => t.name === name) ?? fail(`There's no tool "${name}".`);
     if (asJson)
-        return console.log(JSON.stringify(tool ?? { root, instructions, tools }, null, 2));
+        return console.log(JSON.stringify(tool ?? { root, instructions, project: project ?? null, tools }, null, 2));
     if (tool)
         return console.log(describe(tool));
-    console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
+    const memory = project ? `\n\nThe project's MAQUETTE.md:\n\n${project}` : "";
+    console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}${memory}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
 }
 // Opens a file in $VISUAL or $EDITOR in this terminal, waiting until it's closed, or else in
 // the system's text editor. Returns true when it waited.
@@ -376,7 +378,7 @@ function askPrompt(running) {
         "This is `maquette ask`: one question, one answer, and you can't call tools yourself here. When the question needs tools, give the `maquette call <tool> --flag value` lines that would do it, each on its own line, for the person to run. Required arguments can go without their flag, objects take JSON or @file, and `maquette tools <tool>` shows a tool's flags. At the `maquette ›` prompt itself, the person can instead just say what they want and the model there calls the tools.",
         "Write for a terminal: plain sentences and short lists, commands on their own lines, no headings or tables.",
         running
-            ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}\n\nIts tools:\n${catalogue(running.tools)}`
+            ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}${running.project ? `\n\nThe project's MAQUETTE.md. ${projectRule}\n\n${running.project}` : ""}\n\nIts tools:\n${catalogue(running.tools)}`
             : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
     ].join("\n\n");
 }
@@ -403,7 +405,7 @@ async function ask(tokens) {
     let last = "\n";
     let done;
     try {
-        for await (const event of provider.chat({ system: askPrompt(running), messages: [{ role: "user", parts }], signal: controller.signal })) {
+        for await (const event of provider.chat({ system: [{ name: "ask", text: askPrompt(running) }], messages: [{ role: "user", parts }], signal: controller.signal })) {
             if (event.type === "text") {
                 process.stdout.write(event.text);
                 last = event.text.at(-1) ?? last;
