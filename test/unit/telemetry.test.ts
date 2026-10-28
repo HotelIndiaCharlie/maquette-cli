@@ -103,7 +103,7 @@ test("the same call three times in a turn is flagged as a loop", async () => {
 test("a provider error ends the request's span in error", async () => {
   const { tracing, named } = traced([]);
   tracing.onAgent({ type: "user", text: "hi" });
-  tracing.onAgent({ type: "step_start", step: 1, provider: "anthropic", model: "claude-opus-5-5", request: { system: "", messages: [] } });
+  tracing.onAgent({ type: "step_start", step: 1, provider: "anthropic", model: "claude-opus-5-5", request: { system: [], messages: [] } });
   tracing.onAgent({ type: "step_end", step: 1, ms: 3, failure: "provider.error", error: "Anthropic is rate-limiting these requests (429)." });
   tracing.onAgent({ type: "done" });
   const [llm] = named("llm claude-opus-5-5");

@@ -3,7 +3,7 @@
 // compaction for long conversations, and a server-side fallback model when Claude declines
 // on policy grounds. Claude's replies are kept whole (`native`) and sent back unchanged.
 import Anthropic from "@anthropic-ai/sdk";
-import { ProviderError, safeId } from "./types.js";
+import { ProviderError, safeId, systemText } from "./types.js";
 export const defaultModel = "claude-opus-5-5";
 // Models from before adaptive thinking (Claude 3, and the Claude 4 models before 4.6) take no
 // adaptive thinking, effort or compaction. Every other model, newer ones included, gets them.
@@ -66,7 +66,8 @@ export class AnthropicProvider {
         return {
             model: this.model,
             max_tokens: maxTokens,
-            system: request.system,
+            // Text blocks, with a cache breakpoint after each stable one.
+            ...(systemText(request.system) ? { system: request.system.filter((b) => b.text).map((b) => ({ type: "text", text: b.text, ...(b.cache ? { cache_control: { type: "ephemeral" } } : {}) })) } : {}),
             messages: toAnthropic(request.messages),
             ...(request.tools?.length ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: { type: "object", ...t.inputSchema } })) } : {}),
             // Caches everything up to the last block, so each turn reads the one before from cache.

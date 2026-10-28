@@ -1,4 +1,4 @@
-import { ProviderError } from "./types.js";
+import { ProviderError, systemText } from "./types.js";
 const stops = { stop: "end", tool_calls: "tool_use", function_call: "tool_use", length: "max_tokens", content_filter: "refusal" };
 const imageNote = (p) => `[image${p.path ? ` ${p.path}` : ""} left out: this model is set up without vision (providers.openai-compatible.vision)]`;
 const dataUrl = (p) => ({ type: "image_url", image_url: { url: `data:${p.mediaType};base64,${p.data}` } });
@@ -153,7 +153,7 @@ export class OpenAICompatibleProvider {
         const tools = request.tools ?? [];
         const body = {
             model: this.model,
-            messages: toOpenAI(request.system, request.messages, this.options.vision),
+            messages: toOpenAI(systemText(request.system), request.messages, this.options.vision),
             stream: true,
             stream_options: { include_usage: true },
             ...(tools.length ? { tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: t.inputSchema } })) } : {}),

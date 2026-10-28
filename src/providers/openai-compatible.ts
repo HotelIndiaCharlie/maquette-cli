@@ -3,7 +3,7 @@
 // streams POST {baseUrl}/chat/completions over server-sent events and lists models with
 // GET {baseUrl}/models.
 import type { Settings } from "../settings.ts";
-import { type AssistantMessage, type ChatEvent, type ChatRequest, type ImagePart, type Message, type ModelInfo, type Provider, ProviderError, type StopReason, type ToolCallPart, type Usage } from "./types.ts";
+import { type AssistantMessage, type ChatEvent, type ChatRequest, type ImagePart, type Message, type ModelInfo, type Provider, ProviderError, type StopReason, systemText, type ToolCallPart, type Usage } from "./types.ts";
 
 type Options = Settings["providers"]["openai-compatible"];
 type Chat = { role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string };
@@ -155,7 +155,7 @@ export class OpenAICompatibleProvider implements Provider {
     const tools = request.tools ?? [];
     const body = {
       model: this.model,
-      messages: toOpenAI(request.system, request.messages, this.options.vision),
+      messages: toOpenAI(systemText(request.system), request.messages, this.options.vision),
       stream: true,
       stream_options: { include_usage: true },
       ...(tools.length ? { tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: t.inputSchema } })) } : {}),

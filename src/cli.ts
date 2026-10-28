@@ -17,6 +17,7 @@ import { catalogue, clock, describe, gist, paint, shortPath, tilde, toArgs, type
 import { bannerText } from "./banner.ts";
 import { imageType } from "./images.ts";
 import { findDesignCraft, home, installDesignCraft, pin, pinned } from "./install.ts";
+import { projectRule } from "./agent/prompt.ts";
 import { createProvider, defaultModels, type ImagePart, type TextPart } from "./providers/index.ts";
 import { type Reply, type ServerEvent, type ServerHandle, startServer } from "./server.ts";
 import { defaults, ensure, type Loaded, load, parse, schema, SettingsError, write } from "./settings.ts";
@@ -245,11 +246,12 @@ async function call(name: string | undefined, tokens: string[]) {
 }
 
 async function listTools(name: string | undefined) {
-  const { instructions, tools, root }: { instructions: string; tools: Tool[]; root: string } = await request("/tools");
+  const { instructions, project, tools, root }: { instructions: string; project?: string | null; tools: Tool[]; root: string } = await request("/tools");
   const tool = name === undefined ? undefined : tools.find((t) => t.name === name) ?? fail(`There's no tool "${name}".`);
-  if (asJson) return console.log(JSON.stringify(tool ?? { root, instructions, tools }, null, 2));
+  if (asJson) return console.log(JSON.stringify(tool ?? { root, instructions, project: project ?? null, tools }, null, 2));
   if (tool) return console.log(describe(tool));
-  console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
+  const memory = project ? `\n\nThe project's MAQUETTE.md:\n\n${project}` : "";
+  console.log(`Maquette is working in ${tilde(root)}.\n\n${instructions}${memory}\n\n${catalogue(tools)}\n\n\`maquette tools <name>\` shows a tool's description and flags.`);
 }
 
 // Opens a file in $VISUAL or $EDITOR in this terminal, waiting until it's closed, or else in
@@ -362,13 +364,13 @@ async function listModels() {
 }
 
 // What the model is told in `maquette ask`: where it is, and Maquette's tools when it's running.
-function askPrompt(running?: { root: string; instructions: string; tools: Tool[] }): string {
+function askPrompt(running?: { root: string; instructions: string; project?: string | null; tools: Tool[] }): string {
   return [
     "You answer inside Maquette, a terminal program. Maquette runs DesignCraft, a page-layout program, headless, with one shared document that the person and other terminals and sessions send tool calls to.",
     "This is `maquette ask`: one question, one answer, and you can't call tools yourself here. When the question needs tools, give the `maquette call <tool> --flag value` lines that would do it, each on its own line, for the person to run. Required arguments can go without their flag, objects take JSON or @file, and `maquette tools <tool>` shows a tool's flags. At the `maquette ›` prompt itself, the person can instead just say what they want and the model there calls the tools.",
     "Write for a terminal: plain sentences and short lists, commands on their own lines, no headings or tables.",
     running
-      ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}\n\nIts tools:\n${catalogue(running.tools)}`
+      ? `Maquette is running in ${running.root}; paths in calls are relative to it.\n\nIts instructions:\n${running.instructions}${running.project ? `\n\nThe project's MAQUETTE.md. ${projectRule}\n\n${running.project}` : ""}\n\nIts tools:\n${catalogue(running.tools)}`
       : "Maquette isn't running now, so its tools aren't known here. `maquette` in a project folder starts it, and `maquette tools` then lists them.",
   ].join("\n\n");
 }
@@ -393,7 +395,7 @@ async function ask(tokens: string[]) {
   let last = "\n";
   let done;
   try {
-    for await (const event of provider.chat({ system: askPrompt(running), messages: [{ role: "user", parts }], signal: controller.signal })) {
+    for await (const event of provider.chat({ system: [{ name: "ask", text: askPrompt(running) }], messages: [{ role: "user", parts }], signal: controller.signal })) {
       if (event.type === "text") {
         process.stdout.write(event.text);
         last = event.text.at(-1) ?? last;

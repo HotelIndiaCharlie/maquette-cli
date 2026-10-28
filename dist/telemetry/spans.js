@@ -5,6 +5,7 @@
 // HTTP get a trace of their own. Development only: nothing outside src/telemetry/ imports this.
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { price } from "../agent/cost.js";
+import { systemText } from "../providers/types.js";
 // Long enough for any prompt or tool result Maquette sends; images are never inlined.
 const cap = (s, n = 100_000) => (s.length > n ? `${s.slice(0, n)}… (${s.length - n} more characters)` : s);
 const json = (v) => cap(JSON.stringify(v));
@@ -126,7 +127,8 @@ export class Tracing {
                         "maquette.step": e.step,
                         "input.value": json({ messages: request.messages.length, tools: request.tools?.map((t) => t.name) ?? "text protocol" }),
                         "input.mime_type": "application/json",
-                        ...messageAttributes("llm.input_messages", request.system, request.messages),
+                        "maquette.system_blocks": request.system.map((b) => b.name),
+                        ...messageAttributes("llm.input_messages", systemText(request.system), request.messages),
                         ...toolAttributes(request.tools),
                     }, this.turn.span),
                 };

@@ -98,7 +98,7 @@ What you type decides what happens:
 | A sentence | Goes to the model, which calls tools until the job is done. Each call gets a line: `✓` or `✗`, the tool, its arguments, how long it took, any render's path. |
 | `<tool> …` | Calls a tool yourself, with its arguments as flags (below), with no model in the way. The model is told what you ran. |
 | `!<command>` | Runs a shell command in Maquette's folder. Its output shows and stays in the conversation, so you can ask about it. |
-| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools`, and `/init` (coming: for now it says what it will do) |
+| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools`, and `/init [note]`, which surveys the document, asks two or three questions and writes `MAQUETTE.md` (below) |
 | `tools`, `help`, `help <tool>` | The tools one line each; how to type calls; one tool's description and flags. `help chart_create` gives the whole chart spec format. |
 | `example` | Copies the example report into `./example/` |
 | `open` | Opens the last image in Preview |
@@ -111,7 +111,9 @@ What you type decides what happens:
 - **The screen** is drawn with [Ink](https://github.com/vadimdemedes/ink), like Claude Code's: finished output scrolls up above, the answer streams in with its Markdown, and the input box and the footer (model, effort, permission mode, tokens and, for Claude, dollars) stay at the bottom. When Maquette has no terminal, as under a script or `maquette < /dev/null`, it runs the server alone and prints one plain log line per call, as before.
 - **Other sessions:** their calls appear in the transcript marked `http`, in the order they ran between the model's own.
 - **Renders go back to the model** as images, so a model that can see looks at its own work.
-- **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions on every turn, like `CLAUDE.md`. It's the project's design memory: purpose and audience, voice, look and feel, conventions and decisions, kept short. `/init` will write it from a survey of the document; until then, write it by hand.
+- **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions on every turn, like `CLAUDE.md`. It's the project's design memory: purpose and audience, voice, look and feel, conventions and decisions, kept short. It's the project layer of four (system, studio, user, project): the core, who Maquette is and how it works, is part of Maquette and not a file, and studio and user files come later. The model follows the file over its own defaults, does what you ask when you depart from it, and says so. Edit it mid-session and the next turn tells the model it changed.
+- **`/init`** starts a project from a `.designcraft`, `.idml`, `.indd` or `.indt` file in the folder (or the one below, as in an InDesign package). The model opens it, surveys it with `document_survey` (styles and how much each is used, swatches, fonts, labelled frames, every story's text, a small render of each page), asks two or three questions the pages can't answer, and writes `MAQUETTE.md` with `memory_write`, asking first in `ask` mode. A document from InDesign gets a working `.designcraft` copy, since DesignCraft never saves over the original. Run it again and it proposes changes instead of rewriting your words. Later, when you make a design call worth keeping, the model offers to add it under Decisions with `memory_add`. It works best with a model that can see the renders; without vision it says the result is text-only. A house version of the instructions in `.maquette/skills/init/SKILL.md` (this folder) or `~/.maquette/skills/init/SKILL.md` replaces Maquette's own, [`skills/init/SKILL.md`](skills/init/SKILL.md).
+- **Warnings from opening a document** (missing links or fonts, what converting from InDesign lost) show once as a notice, and are kept in `<file>.maquette.json` beside the document when it's saved, so a later survey still counts them. They never go in `MAQUETTE.md`.
 - **Local models that can't call tools** fall back to a text protocol: the model writes `maquette call …` lines, Maquette asks before running each and sends back the results. The footer then says `text calls`.
 - **Save before you stop:** the document lives only in DesignCraft until `save_document`.
 - **One at a time:** a second `maquette` on the same port says which folder the first one is working in, and exits. Pick another port with `--port`.
@@ -133,14 +135,14 @@ The prompt and `maquette call` read arguments the same way:
 | Command | Does |
 | --- | --- |
 | `maquette call <tool> …` | Calls one tool, with the same flags as the prompt, and prints its text, then `image: <path>` for each image. Exits 1 if the tool reports an error or the call can't be made. `-` reads all the arguments as JSON from stdin. `--json` prints the whole reply instead. |
-| `maquette tools` | The folder Maquette works in, its instructions, and every tool with its first sentence |
+| `maquette tools` | The folder Maquette works in, its instructions, the project's `MAQUETTE.md` if there is one, and every tool with its first sentence |
 | `maquette tools <tool>` | One tool's description and flags |
 
 ### Driving it from another Claude Code session
 
 Paste this into the session while `maquette` is running:
 
-> DesignCraft is running as a shared server called Maquette. Drive it only with `maquette call <tool> --flag value …` from Bash; don't start another DesignCraft. `maquette tools` shows the folder Maquette works in, its instructions and the tools. `maquette tools <tool>` gives a tool's flags, and `maquette tools chart_create` explains the chart spec. Paths are relative to Maquette's folder. Required arguments can go without their flag, and objects take JSON or `@file`. Each call prints the tool's result, and `image: <path>` for each render, which you can look at with Read. A non-zero exit means the call failed, and the printed message says why. Other sessions may be using the same document, so check its state with `inspect_document` before changing it.
+> DesignCraft is running as a shared server called Maquette. Drive it only with `maquette call <tool> --flag value …` from Bash; don't start another DesignCraft. `maquette tools` shows the folder Maquette works in, its instructions and the tools. `maquette tools <tool>` gives a tool's flags, and `maquette tools chart_create` explains the chart spec. Paths are relative to Maquette's folder. Required arguments can go without their flag, and objects take JSON or `@file`. Each call prints the tool's result, and `image: <path>` for each render, which you can look at with Read. A non-zero exit means the call failed, and the printed message says why. Other sessions may be using the same document, so check its state with `inspect_document` before changing it. `maquette tools` also shows the project's design memory, `MAQUETTE.md`, when there is one: follow it.
 >
 > 1. `maquette call open_document example/annual-report.designcraft` (if there's no `example/` folder, run `maquette example` in Maquette's folder first)
 > 2. `maquette call save_document --path <name>.designcraft`, to work on your own copy
@@ -220,7 +222,7 @@ The server address is `providers.openai-compatible.baseUrl` (default `http://loc
 | Request | Reply |
 | --- | --- |
 | `POST /call` with `Content-Type: application/json` and body `{"tool": "<name>", "arguments": {…}}` | `{"id", "tool", "ok", "text", "images"}`: `ok` is false when the tool reported an error; `text` is the tool's text (DesignCraft's tools mostly return JSON as text); `images` are absolute paths |
-| `GET /tools` | `{"root", "instructions", "tools"}`: Maquette's folder, its instructions and the tool list as MCP gives it, with input schemas |
+| `GET /tools` | `{"root", "instructions", "project", "tools"}`: Maquette's folder, its instructions, the text of `MAQUETTE.md` (or null), read on each request, and the tool list as MCP gives it, with input schemas |
 
 An unknown tool, a body that isn't JSON, or `arguments` that aren't an object get a 400 with `{"ok": false, "text": "…"}`. A tool error is still a 200, with `ok: false`.
 
@@ -266,7 +268,7 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | --- | --- |
 | [`src/cli.ts`](src/cli.ts) | `maquette` and its commands: `call`, `tools`, `example`, `config`, `ask`, `models`, `install-designcraft` |
 | [`src/server.ts`](src/server.ts) | The running Maquette: the engine as a child process, the queue that runs calls one at a time, the HTTP server |
-| [`src/agent/`](src/agent/) | The agent loop ([`session.ts`](src/agent/session.ts)), routing of typed lines, permissions, the system prompt, `!` commands and costs. It emits events and knows nothing about the screen. |
+| [`src/agent/`](src/agent/) | The agent loop ([`session.ts`](src/agent/session.ts)), routing of typed lines, permissions, the system prompt ([`core.ts`](src/agent/core.ts) is its fixed core, [`prompt.ts`](src/agent/prompt.ts) adds the environment and `MAQUETTE.md`), `!` commands and costs. It emits events and knows nothing about the screen. |
 | [`src/ui/`](src/ui/) | The Ink screen: transcript, streaming answer with Markdown, tool lines, permission prompt, input box, footer |
 | [`src/args.ts`](src/args.ts) | How a typed line becomes a tool's arguments, shared by the prompt, `maquette call` and the text protocol |
 | [`src/engine.ts`](src/engine.ts) | The engine, an MCP server on stdio: DesignCraft's tools passed through, plus each tool module's |
@@ -274,7 +276,8 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | [`src/install.ts`](src/install.ts) | Finds the DesignCraft CLI, or downloads, checks and unpacks the pinned one |
 | [`src/settings.ts`](src/settings.ts) | The settings: their keys, types and defaults, the four layers, and writing one key |
 | [`src/providers/`](src/providers/) | Model providers behind one interface ([`types.ts`](src/providers/types.ts)): [`anthropic.ts`](src/providers/anthropic.ts), [`openai-compatible.ts`](src/providers/openai-compatible.ts), and [`fake.ts`](src/providers/fake.ts) for tests |
-| [`src/tools/`](src/tools/) | Tool modules; [`chart/`](src/tools/chart/) is the first |
+| [`src/tools/`](src/tools/) | Tool modules: [`chart/`](src/tools/chart/), [`survey/`](src/tools/survey/) (`document_survey`) and [`memory/`](src/tools/memory/) (`memory_write`, `memory_add`) |
+| [`skills/`](skills/) | Skills Maquette ships; [`init/SKILL.md`](skills/init/SKILL.md) is what `/init` tells the model |
 | [`examples/`](examples/) | The example report (an A4 annual report for a fictional cooperative, with five labelled chart slots), its CSVs and their `-updated` versions, and five chart specs |
 | [`designcraft-pin.json`](designcraft-pin.json) | The DesignCraft version Maquette is tested with, and its CLI's download and checksum |
 
@@ -291,6 +294,22 @@ npm run test:all     # all of the above
 npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
+
+Every push and pull request runs `typecheck`, `test:unit`, `smoke` and a check that `dist/` matches `src/`, on Linux and macOS with Node 24 ([`.github/workflows/test.yml`](.github/workflows/test.yml)); the result shows as the "Unit tests" check on the branch.
+
+### Testing a branch beside main
+
+Keep two checkouts: `~/maquette-cli` on main, linked as the global `maquette`, and `~/maquette-cli-test` for the branch under test, run from its source as `mqtb` on its own port. No build and no `npm link` for the branch, so main keeps working and both can run at once.
+
+One-time setup (the first line points the global `maquette` back at main):
+
+```bash
+cd ~/maquette-cli && git checkout main && git pull && npm install && npm link
+cd ~/maquette-cli-test && npm install
+echo "alias mqtb='MAQUETTE_PORT=8788 node ~/maquette-cli-test/src/cli.ts'" >> ~/.zshrc && source ~/.zshrc
+```
+
+Before testing a ticket: `cd ~/maquette-cli-test && git fetch && git checkout <branch> && git pull && npm install`. Then try it in a scratch folder, never inside either checkout: `mkdir -p ~/maquette-try && cd ~/maquette-try && mqtb`. `maquette` (port 8787) and `mqtb` (port 8788) can run at the same time in two folders. `mqtb call …` and `mqtb tools` reach the branch's server, since they read the same `MAQUETTE_PORT`. Both read `~/.maquette/settings.json`; a key only the branch knows is ignored by main with a warning.
 
 To see what the agent does on each turn (every request to the model with its thinking, every tool call with where its time went, and why anything failed), run [Phoenix](https://github.com/Arize-ai/phoenix) and start Maquette with `MAQUETTE_TRACE=1 npm run dev`. [`docs/telemetry.md`](docs/telemetry.md) has the details.
 

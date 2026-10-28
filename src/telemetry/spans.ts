@@ -6,7 +6,7 @@
 import { context, type Span, SpanStatusCode, type Tracer, trace } from "@opentelemetry/api";
 import type { AgentEvent, Failure } from "../agent/events.ts";
 import { price } from "../agent/cost.ts";
-import type { Message, ToolSpec } from "../providers/types.ts";
+import { type Message, systemText, type ToolSpec } from "../providers/types.ts";
 import type { ServerEvent } from "../server.ts";
 
 type Attributes = Record<string, string | number | boolean | string[]>;
@@ -139,7 +139,8 @@ export class Tracing {
               "maquette.step": e.step,
               "input.value": json({ messages: request.messages.length, tools: request.tools?.map((t) => t.name) ?? "text protocol" }),
               "input.mime_type": "application/json",
-              ...messageAttributes("llm.input_messages", request.system, request.messages),
+              "maquette.system_blocks": request.system.map((b) => b.name),
+              ...messageAttributes("llm.input_messages", systemText(request.system), request.messages),
               ...toolAttributes(request.tools),
             },
             this.turn.span,

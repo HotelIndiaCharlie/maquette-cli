@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { extname, join } from "node:path";
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import { projectInstructions } from "./agent/prompt.js";
 import { stamp } from "./args.js";
 export async function startServer(options) {
     const root = options.root ?? process.cwd();
@@ -78,8 +79,9 @@ export async function startServer(options) {
         // can't post JSON here without a CORS preflight, which this server never answers.
         if (!hosts.has(req.headers.host ?? ""))
             return send(403, { ok: false, text: "Only local clients may call this server." });
+        // `project` is MAQUETTE.md as it is now, so every session works to the same design memory.
         if (req.method === "GET" && req.url === "/tools")
-            return send(200, { root, instructions, tools });
+            return send(200, { root, instructions, project: projectInstructions(root) ?? null, tools });
         if (req.method !== "POST" || req.url !== "/call")
             return send(404, { ok: false, text: "POST /call {tool, arguments}, or GET /tools." });
         if (!req.headers["content-type"]?.startsWith("application/json"))

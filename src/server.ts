@@ -6,6 +6,7 @@ import { createServer, type Server } from "node:http";
 import { extname, join } from "node:path";
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import { projectInstructions } from "./agent/prompt.ts";
 import { stamp, type Tool } from "./args.ts";
 import type { ToolResult } from "./designcraft.ts";
 
@@ -109,7 +110,8 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
     // Local clients sending JSON only: the Host check stops DNS rebinding, and a web page
     // can't post JSON here without a CORS preflight, which this server never answers.
     if (!hosts.has(req.headers.host ?? "")) return send(403, { ok: false, text: "Only local clients may call this server." });
-    if (req.method === "GET" && req.url === "/tools") return send(200, { root, instructions, tools });
+    // `project` is MAQUETTE.md as it is now, so every session works to the same design memory.
+    if (req.method === "GET" && req.url === "/tools") return send(200, { root, instructions, project: projectInstructions(root) ?? null, tools });
     if (req.method !== "POST" || req.url !== "/call") return send(404, { ok: false, text: "POST /call {tool, arguments}, or GET /tools." });
     if (!req.headers["content-type"]?.startsWith("application/json")) return send(415, { ok: false, text: "Send the call as application/json." });
     let body: { tool?: unknown; arguments?: unknown };
