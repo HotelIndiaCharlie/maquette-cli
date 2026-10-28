@@ -2,6 +2,7 @@
 import chart from "./chart/index.ts";
 import memory from "./memory/index.ts";
 import survey from "./survey/index.ts";
+import workspace from "./workspace/index.ts";
 import type { ToolFactory } from "./types.ts";
 
-export const modules: ToolFactory[] = [chart, survey, memory];
+export const modules: ToolFactory[] = [chart, survey, memory, workspace];

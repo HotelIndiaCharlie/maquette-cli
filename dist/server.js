@@ -8,6 +8,7 @@ import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { projectInstructions } from "./agent/prompt.js";
 import { stamp } from "./args.js";
+const extensions = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 export async function startServer(options) {
     const root = options.root ?? process.cwd();
     const { port } = options;
@@ -46,7 +47,7 @@ export async function startServer(options) {
                 else if (c.type === "image" && c.data) {
                     mkdirSync(images, { recursive: true });
                     const n = reply.images.length ? `-${reply.images.length + 1}` : "";
-                    const path = join(images, `${String(id).padStart(3, "0")}-${tool}${n}.${c.mimeType === "image/jpeg" ? "jpg" : "png"}`);
+                    const path = join(images, `${String(id).padStart(3, "0")}-${tool}${n}.${extensions[c.mimeType ?? ""] ?? "png"}`);
                     writeFileSync(path, Buffer.from(c.data, "base64"));
                     reply.images.push(path);
                     lastImage = path;

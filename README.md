@@ -34,7 +34,7 @@ One [DesignCraft](https://github.com/storytold/designcraft) for every session. T
 
 **Why:** each Claude Code session that lists DesignCraft as an MCP server starts its own engine with its own document, so two sessions can't work on the same page. Maquette runs one engine and shares it.
 
-**Tools:** besides DesignCraft's own tools, Maquette adds coarse tools that do in one call what takes dozens of DesignCraft commands. The first is the chart tool. More will come as tool modules (see [Adding a tool](#adding-a-tool)).
+**Tools:** besides DesignCraft's own tools, Maquette adds coarse tools that do in one call what takes dozens of DesignCraft commands. The first is the chart tool. More will come as tool modules (see [Adding a tool](#adding-a-tool)). The model also gets workspace tools for the folder itself, so nothing needs a second terminal: `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `view_image` and `open_file`.
 
 ## Install
 
@@ -111,6 +111,7 @@ What you type decides what happens:
 - **The screen** is drawn with [Ink](https://github.com/vadimdemedes/ink), like Claude Code's: finished output scrolls up above, the answer streams in with its Markdown, and the input box and the footer (model, effort, permission mode, tokens and, for Claude, dollars) stay at the bottom. When Maquette has no terminal, as under a script or `maquette < /dev/null`, it runs the server alone and prints one plain log line per call, as before.
 - **Other sessions:** their calls appear in the transcript marked `http`, in the order they ran between the model's own.
 - **Renders go back to the model** as images, so a model that can see looks at its own work.
+- **Files and the shell:** the model reads, finds and edits files with `read_file`, `glob`, `grep`, `write_file` and `edit_file`, runs commands such as tests with `bash` (120 s timeout by default, output capped), looks at an image with `view_image` and shows you one with `open_file`. The file tools only reach inside Maquette's folder: a path that leads out, by `../`, an absolute path or a symlink, is refused. `view_image` is the exception, so it can look at `~/Desktop/reference.png`; it reads only images. In `ask` mode `bash`, writes, edits and `open_file` ask first; reads, `glob`, `grep` and `view_image` don't. Other sessions can call them too: `maquette call read_file example/specs/01-revenue.json`.
 - **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions on every turn, like `CLAUDE.md`. It's the project's design memory: purpose and audience, voice, look and feel, conventions and decisions, kept short. It's the project layer of four (system, studio, user, project): the core, who Maquette is and how it works, is part of Maquette and not a file, and studio and user files come later. The model follows the file over its own defaults, does what you ask when you depart from it, and says so. Edit it mid-session and the next turn tells the model it changed.
 - **`/init`** starts a project from a `.designcraft`, `.idml`, `.indd` or `.indt` file in the folder (or the one below, as in an InDesign package). The model opens it, surveys it with `document_survey` (styles and how much each is used, swatches, fonts, labelled frames, every story's text, a small render of each page), asks two or three questions the pages can't answer, and writes `MAQUETTE.md` with `memory_write`, asking first in `ask` mode. A document from InDesign gets a working `.designcraft` copy, since DesignCraft never saves over the original. Run it again and it proposes changes instead of rewriting your words. Later, when you make a design call worth keeping, the model offers to add it under Decisions with `memory_add`. It works best with a model that can see the renders; without vision it says the result is text-only. A house version of the instructions in `.maquette/skills/init/SKILL.md` (this folder) or `~/.maquette/skills/init/SKILL.md` replaces Maquette's own, [`skills/init/SKILL.md`](skills/init/SKILL.md).
 - **Warnings from opening a document** (missing links or fonts, what converting from InDesign lost) show once as a notice, and are kept in `<file>.maquette.json` beside the document when it's saved, so a later survey still counts them. They never go in `MAQUETTE.md`.
@@ -276,7 +277,7 @@ Then add it to the list in [`src/tools/index.ts`](src/tools/index.ts). Its tools
 | [`src/install.ts`](src/install.ts) | Finds the DesignCraft CLI, or downloads, checks and unpacks the pinned one |
 | [`src/settings.ts`](src/settings.ts) | The settings: their keys, types and defaults, the four layers, and writing one key |
 | [`src/providers/`](src/providers/) | Model providers behind one interface ([`types.ts`](src/providers/types.ts)): [`anthropic.ts`](src/providers/anthropic.ts), [`openai-compatible.ts`](src/providers/openai-compatible.ts), and [`fake.ts`](src/providers/fake.ts) for tests |
-| [`src/tools/`](src/tools/) | Tool modules: [`chart/`](src/tools/chart/), [`survey/`](src/tools/survey/) (`document_survey`) and [`memory/`](src/tools/memory/) (`memory_write`, `memory_add`) |
+| [`src/tools/`](src/tools/) | Tool modules: [`chart/`](src/tools/chart/), [`survey/`](src/tools/survey/) (`document_survey`), [`memory/`](src/tools/memory/) (`memory_write`, `memory_add`) and [`workspace/`](src/tools/workspace/) (`bash`, the file tools, `view_image`, `open_file`) |
 | [`prompts/`](prompts/) | What the model is told, as Markdown: [`core.md`](prompts/core.md) is the fixed core of the system prompt, the rest the session's and project's blocks and `maquette ask`'s prompt. `{{name}}` is filled in by the code and `{{> name}}` takes in another file. Edit them here and restart Maquette; traces record which version each reply came from |
 | [`skills/`](skills/) | Skills Maquette ships; [`init/SKILL.md`](skills/init/SKILL.md) is what `/init` tells the model |
 | [`examples/`](examples/) | The example report (an A4 annual report for a fictional cooperative, with five labelled chart slots), its CSVs and their `-updated` versions, and five chart specs |
@@ -318,9 +319,8 @@ To see what the agent does on each turn (every request to the model with its thi
 
 ## Not built yet
 
-[`ROADMAP.md`](ROADMAP.md) lays out the rest of the plan: built-in shell and file tools for the model, other MCP servers, skills, saved sessions and `/compact`, hooks and a JSON mode.
+[`ROADMAP.md`](ROADMAP.md) lays out the rest of the plan: other MCP servers, skills, saved sessions and `/compact`, hooks and a JSON mode.
 
-- **Tools of its own.** The model can only call DesignCraft's and Maquette's tools; it can't run shell commands or read files itself yet (Phase 3). You can, with `!`.
 - **Saved conversations.** A conversation lasts as long as `maquette` runs (Phase 6).
 - **Keeping hand changes** to a chart across `chart_update`. They're detected and reported.
 - **More charts:** stacked or grouped bars, more than two series, and areas.

@@ -1,7 +1,7 @@
 // `npm run smoke`: the whole prompt end to end, in one process. The real server runs the stub
 // engine, the fake provider plays the model, and the Ink screen is driven through
 // ink-testing-library as a person would type. No key, no network, no DesignCraft.
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,8 @@ import { closedPort } from "./unit/mock.ts";
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 const tick = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 const root = mkdtempSync(join(tmpdir(), "maquette-smoke-"));
-mkdirSync(join(root, "example"));
+mkdirSync(join(root, "example", "data"), { recursive: true });
+writeFileSync(join(root, "example", "data", "01-revenue-updated.csv"), "year,revenue\n2024,10\n2025,14\n");
 const port = await closedPort();
 const server = await startServer({ port, version: "smoke", root, engine: fileURLToPath(new URL("./stub-engine.ts", import.meta.url)) });
 
@@ -27,6 +28,11 @@ const provider = new FakeProvider([
   { calls: [{ name: "chart_create", input: { frame: "firstlight:slot:01", spec } }] },
   { calls: [{ name: "render_page", input: { page: 0 } }] },
   { text: "Done. The revenue chart sits in the first slot, and page one is rendered at `maquette-renders/…/003-render_page.png`." },
+  // One prompt with a shell step: bash asks, read_file doesn't, then the chart and the save.
+  { calls: [{ name: "bash", input: { command: "echo 3 tests passed" } }] },
+  { calls: [{ name: "read_file", input: { path: "example/data/01-revenue-updated.csv" } }] },
+  { calls: [{ name: "chart_create", input: { frame: "firstlight:slot:01", spec: { ...spec, data: { url: "example/data/01-revenue-updated.csv" } } } }, { name: "save_document", input: {} }] },
+  { text: "The tests pass, and the chart now shows 2025 at 14. The document is saved." },
 ]);
 const session = new AgentSession({ server, provider, settings: settings(), projectFile: join(root, ".maquette", "settings.json") });
 const screen = render(h(App, { session, server, info: { version: "smoke", engineName: "Stub engine", toolCount: server.tools.length, port, images: "maquette-renders/smoke" }, onExit: () => {} }));
@@ -70,9 +76,19 @@ try {
   await type("!ls");
   screen.stdin.write("\r");
   await until(/! ls\n\s+example/, "the shell listing");
+  await type("run the tests, then update the revenue chart with the new CSV and save");
+  screen.stdin.write("\r");
+  await until(/Allow bash/, "the permission prompt for bash");
+  screen.stdin.write("y");
+  await until(/Allow save_document/, "the permission prompt for save_document");
+  screen.stdin.write("y");
+  await until(/The document is saved\./, "the answer after the shell step");
+  expect(/✓ bash --command echo 3 tests passed/, "the bash line");
+  expect(/✓ read_file --path example\/data\/01-revenue-updated\.csv/, "the read_file line, run without asking");
+  expect(/✓ save_document/, "the save_document line");
   await type("/cost");
   screen.stdin.write("\r");
-  await until(/4 turns with the model/, "/cost");
+  await until(/8 turns with the model/, "/cost");
   await type("exit");
   screen.stdin.write("\r");
   await tick(100);
@@ -81,5 +97,5 @@ try {
 }
 screen.unmount();
 await server.stop();
-console.log(failures.length ? `\nSmoke test failed:\n  ${failures.join("\n  ")}` : `\nSmoke test passed: ${server.tools.length} tools, ${provider.requests.length} model turns, 4 calls through the queue.`);
+console.log(failures.length ? `\nSmoke test failed:\n  ${failures.join("\n  ")}` : `\nSmoke test passed: ${server.tools.length} tools, ${provider.requests.length} model turns, ${provider.requests.length > 4 ? 8 : 4} calls through the queue.`);
 process.exit(failures.length ? 1 : 0);

@@ -2,4 +2,5 @@
 import chart from "./chart/index.js";
 import memory from "./memory/index.js";
 import survey from "./survey/index.js";
-export const modules = [chart, survey, memory];
+import workspace from "./workspace/index.js";
+export const modules = [chart, survey, memory, workspace];
