@@ -61,8 +61,10 @@ export function renderItem(item: Item, root: string): ReactNode {
   }
 }
 
-export function Transcript({ items, root }: { items: Item[]; root: string }) {
-  return h(Static<Item>, { items, children: (item: Item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
+// `generation` changes on a window resize: a fresh <Static> writes every item again, so the
+// whole transcript comes back, laid out at the new width, after the screen was cleared.
+export function Transcript({ items, root, generation = 0 }: { items: Item[]; root: string; generation?: number }) {
+  return h(Static<Item>, { key: generation, items, children: (item: Item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
 }
 
 export const shortRoot = (root: string) => tilde(root);

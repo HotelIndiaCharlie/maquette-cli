@@ -50,7 +50,9 @@ export function renderItem(item, root) {
             return h(Box, { paddingLeft: 2 }, h(Text, { color: item.level === "error" ? "red" : item.level === "warn" ? "yellow" : undefined, dimColor: item.level === "info" }, item.text));
     }
 }
-export function Transcript({ items, root }) {
-    return h((Static), { items, children: (item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
+// `generation` changes on a window resize: a fresh <Static> writes every item again, so the
+// whole transcript comes back, laid out at the new width, after the screen was cleared.
+export function Transcript({ items, root, generation = 0 }) {
+    return h((Static), { key: generation, items, children: (item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
 }
 export const shortRoot = (root) => tilde(root);

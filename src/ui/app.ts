@@ -34,9 +34,14 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [columns, setColumns] = useState((stdout as NodeJS.WriteStream).columns || 80);
-  // Redraw at the new width when the window is resized.
+  const [generation, setGeneration] = useState(0);
+  // After a resize the screen has been cleared (see runApp), so draw everything again at the
+  // new width: the transcript through a fresh <Static>, and the live part as usual.
   useEffect(() => {
-    const onResize = () => setColumns((stdout as NodeJS.WriteStream).columns || 80);
+    const onResize = () => {
+      setColumns((stdout as NodeJS.WriteStream).columns || 80);
+      setGeneration((g) => g + 1);
+    };
     stdout.on("resize", onResize);
     return () => void stdout.off("resize", onResize);
   }, []);
@@ -142,7 +147,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
   return h(
     Box,
     { flexDirection: "column" },
-    h(Transcript, { items, root: server.root }),
+    h(Transcript, { items, root: server.root, generation }),
     segments ? h(Turn, { segments, root: server.root, waiting: busy && !ask }) : null,
     ask ? h(PermissionPrompt, { name: ask.name, input: ask.input }) : null,
     pick ? h(Picker, { title: pick.title, options: pick.options, index: pick.index }) : null,
