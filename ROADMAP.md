@@ -95,6 +95,8 @@ These are ordinary tool modules in the sense of `src/tools/types.ts`, so they al
 
 **Done when:** "run the tests, then update the revenue chart with the new CSV and save" works from one prompt, including the shell step.
 
+**As built (HOT-53):** one module, `src/tools/workspace/`, loaded by the engine like the others. The tool that opens a file is `open_file`, not `open`, since `open` is a prompt command and a tool's name typed first runs it directly, which would turn "open the report" into a call. `open_file` counts as a change, because opening a file can run it. `view_image` reads any path, `~` included, but only image bytes; the other file tools go through `confine()`, which follows every symlink and checks a not-yet-existing file through its nearest existing folder. `glob` is Maquette's own (`**`, `*`, `?`, `{a,b}`, `[…]`) rather than `fs.glob`, and skips `node_modules` and `.git`. `bash` shares `src/agent/shell.ts` with `!`, which now runs each command in its own process group so a timeout or Ctrl-C stops what it started; the timeout is 120 s by default, at most 300. The stub engine carries the real workspace tools, so `npm run smoke` runs the done-when sentence with the fake model: `bash` asks, `read_file` doesn't, then the chart and the save.
+
 ### Phase 4: MCP servers
 
 Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engine.ts` on stdio). This phase generalises both.

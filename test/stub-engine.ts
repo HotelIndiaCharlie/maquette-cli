@@ -1,8 +1,12 @@
 // A stand-in for src/engine.ts in tests: an MCP server on stdio with a few scripted tools and
 // no DesignCraft, so `maquette` can start anywhere. MAQUETTE_ENGINE points Maquette at it.
+// The workspace tools are the real ones, in the folder the engine starts in, since they
+// need no DesignCraft.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { DesignCraft } from "../src/designcraft.ts";
+import workspaceTools from "../src/tools/workspace/index.ts";
 
 // A 1×1 white PNG.
 export const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
@@ -18,13 +22,16 @@ const tools = [
   { name: "slow", description: "Takes a while.", inputSchema: { type: "object", properties: { ms: { type: "integer" } } } },
 ];
 
+const workspace = workspaceTools({ dc: {} as DesignCraft, root: process.cwd(), readRoots: [process.cwd()], warnings: () => [] });
+
 let open: string | null = null;
 const server = new Server({ name: "stub", version: "0" }, { capabilities: { tools: {} }, instructions: "Stub engine: nothing is really drawn." });
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...tools, ...workspace.tools] }));
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name } = req.params;
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
   const text = (t: string) => ({ content: [{ type: "text", text: t }] });
+  if (workspace.tools.some((t) => t.name === name)) return workspace.call(name, args);
   switch (name) {
     case "open_document":
       open = String(args.path);
