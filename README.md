@@ -297,7 +297,9 @@ npm run typecheck
 npm run build        # compiles src/ to dist/
 ```
 
-Every push and pull request runs `typecheck`, `test:unit`, `smoke` and a check that `dist/` matches `src/`, on Linux and macOS with Node 24 ([`.github/workflows/test.yml`](.github/workflows/test.yml)); the result shows as the "Unit tests" check on the branch.
+Every push and pull request runs `typecheck`, `test:unit`, `smoke` and a build, on Linux and macOS with Node 24 ([`.github/workflows/test.yml`](.github/workflows/test.yml)); the result shows as the "Unit tests" check on the branch. A pull request also gets the "PR rules" check ([`.github/workflows/pr-rules.yml`](.github/workflows/pr-rules.yml)): its title names an issue (`HOT-<n>`), its branch names the same one, and it doesn't change `dist/`.
+
+Commit messages name their issue, as in `Fix the chart preview (HOT-108)`. A hook checks it; turn it on once per clone with `npm run hooks`. The rules for branches, worktrees and pull requests are in [`AGENTS.md`](AGENTS.md).
 
 ### Testing a branch beside main
 
@@ -315,7 +317,7 @@ Before testing a ticket: `cd ~/maquette-cli-test && git fetch && git checkout <b
 
 To see what the agent does on each turn (every request to the model with its thinking, every tool call with where its time went, and why anything failed), start Maquette with `--trace` (`npm run dev -- --trace`, or `mqtb --trace`): it starts [Phoenix](https://github.com/Arize-ai/phoenix) in Docker, and Docker itself if need be, and traces to it on http://localhost:6006. [`docs/telemetry.md`](docs/telemetry.md) has the details.
 
-`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
+`dist/` is committed on `main`, so installing from GitHub needs no build step or dev dependencies. Don't commit it on a branch: after every merge, the "Build dist" Action ([`.github/workflows/dist.yml`](.github/workflows/dist.yml)) rebuilds it and commits it to `main`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 
 ## Not built yet
 

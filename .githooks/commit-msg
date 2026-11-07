@@ -1,0 +1,14 @@
+#!/bin/sh
+# Every commit names its issue on the first line, as in "Fix the chart preview (HOT-108)".
+# Turn this hook on once per clone: npm run hooks (git config core.hooksPath .githooks).
+# Merge, fixup!, squash!, amend! and revert commits pass: they carry their issue another way.
+first=$(sed -n '1p' "$1")
+case "$first" in
+  Merge\ *|fixup!\ *|squash!\ *|amend!\ *|Revert\ *) exit 0 ;;
+esac
+if printf '%s' "$first" | grep -qE 'HOT-[0-9]+'; then
+  exit 0
+fi
+echo "commit-msg: the first line must name the issue, as in \"Fix the chart preview (HOT-108)\"." >&2
+echo "See AGENTS.md, \"Git workflow\". The message is kept in .git/COMMIT_EDITMSG." >&2
+exit 1

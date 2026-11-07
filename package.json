@@ -21,7 +21,8 @@
     "test": "node test/charts.ts",
     "test:unit": "node --test test/unit/*.test.ts",
     "test:all": "npm run test:unit && npm run smoke && npm test",
-    "smoke": "node test/smoke.ts"
+    "smoke": "node test/smoke.ts",
+    "hooks": "git config core.hooksPath .githooks"
   },
   "engines": {
     "node": ">=24"

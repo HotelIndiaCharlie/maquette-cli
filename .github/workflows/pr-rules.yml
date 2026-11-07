@@ -1,0 +1,45 @@
+# The git rules in AGENTS.md ("Git workflow") that a machine can check on a pull request:
+# the title names an issue, a hot-<n> branch names the same issue, and dist/ is left alone.
+name: PR rules
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  rules:
+    name: PR rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Title and branch name the same issue
+        # Title and branch come from the PR author, so they reach the script as environment
+        # variables, never pasted into it.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          title_ids=$(printf '%s' "$TITLE" | grep -oiE 'HOT-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u || true)
+          if [ -z "$title_ids" ]; then
+            echo "::error::The PR title must name its issue, as in \"… (HOT-<n>)\"."
+            exit 1
+          fi
+          branch_id=$(printf '%s' "$BRANCH" | grep -oiE 'hot-[0-9]+' | head -n 1 | tr '[:lower:]' '[:upper:]' || true)
+          if [ -n "$branch_id" ] && ! printf '%s\n' "$title_ids" | grep -qx "$branch_id"; then
+            echo "::error::The branch names $branch_id but the title names $(echo $title_ids). Use the issue's gitBranchName and name the same issue in the title."
+            exit 1
+          fi
+          echo "Title names: $(echo $title_ids). Branch: $BRANCH."
+      - name: dist/ is not changed
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          changed=$(git diff --name-only "origin/$BASE...HEAD" -- dist)
+          if [ -n "$changed" ]; then
+            echo "::error::This PR changes dist/. dist/ is built on main after the merge (dist.yml); remove it from the branch, for example: git checkout origin/$BASE -- dist && git commit -m \"Drop dist/ (HOT-<n>)\""
+            printf '%s\n' "$changed" | head -n 20
+            exit 1
+          fi
+          echo "dist/ untouched."
