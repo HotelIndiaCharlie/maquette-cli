@@ -1,6 +1,6 @@
 # Provare le fondamenta CLI
 
-Implementazione del 7 novembre 2026: HOT-54, HOT-55, HOT-63 e HOT-56. HOT-57 (hooks, agente headless, automazione JSON), HOT-61 e HOT-65 restano escluse. Nessun rilascio o merge è stato eseguito.
+Implementazione del 7 novembre 2026: HOT-54, HOT-55, HOT-63 e HOT-56, con follow-up UX e protezione chart_update HOT-108 su `codex/cli-foundations-ux`. Le cinque issue hanno l'etichetta Linear **CLI foundations UX**. HOT-57 (hooks, agente headless, automazione JSON), HOT-61 e HOT-65 restano escluse; anche preservazione dei ritocchi HOT-66, valori/reset/detach HOT-95 e aggiornamenti proposti/watch/pannello HOT-91 restano fuori da questo intervento. Nessun rilascio o merge è stato eseguito.
 
 ## Verifica automatica
 
@@ -13,12 +13,66 @@ npm run smoke
 npm run build
 npm test
 npm run test:foundations:live
+npm run test:chart-safety:live
 npm run test:package
 ```
 
-Unit test e smoke usano provider finti, motore stub e server MCP locali: non richiedono chiavi API. Le ultime tre prove richiedono macOS e il DesignCraft 0.13.0 fissato dal progetto, già installato (`maquette install-designcraft`). `test:package` crea un tarball e lo installa in una cartella temporanea senza dipendenze di sviluppo; può accedere al registro npm per installare le dipendenze. Non pubblica nulla.
+Unit test e smoke usano provider finti, motore stub e server MCP locali: non richiedono chiavi API. Le ultime quattro prove richiedono macOS e il DesignCraft 0.13.0 fissato dal progetto, già installato (`maquette install-designcraft`). `test:package` crea un tarball e lo installa in una cartella temporanea senza dipendenze di sviluppo; può accedere al registro npm per installare le dipendenze. Non pubblica nulla.
 
 `test:foundations:live` usa DesignCraft reale con risposte del modello scriptate: crea e salva un chart, lo aggiorna da un client MCP SDK separato, rende cinque pagine, riavvia il runtime e riprende la conversazione senza ripetere la creazione. Stampa il percorso dei documenti e dei journal temporanei. Non misura la qualità delle risposte di un modello reale.
+
+`test:chart-safety:live` usa oggetti DesignCraft reali. Verifica input invalido e CSV assente senza effetti; inietta un errore dopo il primo effetto di disegno e dopo la prima etichetta definitiva, poi confronta il documento e il registro con l'originale. Verifica inoltre spostamento dell'intero gruppo, preview fallita dopo un aggiornamento riuscito e rifiuto dopo un ritocco interno. I guasti di connessione e pulizia sono coperti separatamente dai test unitari deterministici.
+
+Per ripetere solo le nuove prove senza DesignCraft né chiavi:
+
+```sh
+cd /Users/timwoodman/maquette-cli
+node --test test/unit/cli-ux.test.ts test/unit/chart-safety.test.ts
+```
+
+Le prove UX inviano veri tasti al componente Ink: Ctrl-C/Esc durante `/compact`, Ctrl-C durante un tool non cancellabile, paginazione, dettaglio Ctrl-O, mantenimento degli input in coda e ripresa dei journal precedenti.
+
+## Prova personale delle novità UX
+
+Prepara la cartella temporanea come nella sezione successiva. Anche senza chiamare un modello puoi provare input, tool diretti, ripresa e shell:
+
+```text
+/sessions
+inspect_document
+/clear
+!echo Second conversation
+/resume
+```
+
+Ogni invio deve lasciare una sola riga `❯`. `/resume` mostra titoli, data, provider/modello e ID; la conversazione corrente e quelle occupate sono disabilitate. Seleziona la prima conversazione con frecce e Invio: l'header deve precedere i turni ripristinati e spiegare che documento e permessi `always` non vengono ripristinati. Nessun tool viene rieseguito. `/resume <id>` evita il menu; Esc lo chiude senza cambiare conversazione. Provider, modello e modalità dei permessi rimangono quelli correnti.
+
+Esci e riavvia dalla stessa cartella: scegli fra nuova conversazione, selezionata di default, e le tre più recenti non vuote. Non serve più rilanciare il processo per cambiare conversazione. Con oltre dieci conversazioni, `/resume` deve mostrare **Next page** in posizione 11 e **Previous page** dopo le voci successive. Le sessioni vuote non occupano questi posti; `/sessions` continua a dare anche le diagnostiche dei file non validi.
+
+Premi Ctrl-O dopo un tool: appare un pannello di dettaglio, richiudibile con Ctrl-O o Esc senza aggiungere copie allo storico. Il testo lungo dichiara il troncamento e indica il journal completo. Per provare il collasso, chiedi al modello tre chiamate consecutive a `chart_list`, senza testo fra esse: tre risultati riusciti e identici diventano una riga `×3, same result`. La verifica automatica controlla che siano state eseguite e registrate tutte e tre; il modello può scegliere diversamente durante una prova libera.
+
+Esegui `!sleep 20`, attendi **Running shell command...**, poi Ctrl-C o Esc: deve comparire **Interrupted.** e tornare il prompt. Dopo diversi turni completi esegui `/compact` e interrompilo durante **Compacting conversation...**: il contesto precedente deve restare utilizzabile. Durante una chiamata tool non cancellabile, l'interruzione mostra **Stopping after the current call...** fino al risultato effettivo. Un altro input già accodato deve poi essere eseguito.
+
+Ridimensiona il terminale fra circa 110 e 44 colonne, con una risposta e un dettaglio visibili, poi ripeti `/resume`. Il ridisegno deve mantenere prompt e stato utilizzabili; controlla personalmente la leggibilità nel tuo emulatore. Le etichette CLI sono inglesi; input, risposte del modello e contenuto restituito dai tool mantengono la loro lingua.
+
+## Prova personale della sicurezza chart_update
+
+Dopo aver creato e salvato il grafico dei ricavi come sotto, annota l'ID da `chart_list`. Prova gli errori intenzionali:
+
+```text
+chart_update <id> --spec '{"mark":"area"}'
+chart_update <id> --data '{"url":"missing.csv"}'
+chart_list
+render_page --page 0
+```
+
+Il chart originale deve rimanere presente e invariato. Per la prova con dati validi:
+
+```text
+chart_update <id> --data '{"url":"example/data/01-revenue-updated.csv"}'
+save_document
+```
+
+Se modifichi una barra o il testo di un'etichetta tramite i comandi nativi, l'update deve rifiutare i **ritocchi rilevati**, mantenendo l'originale. Lo spostamento del gruppo intero è invece mantenuto. Non c'è un'opzione force/reset/detach. Il rilevamento corrente controlla geometria, testo visibile, fill/stroke e aggiunte/rimozioni; non rappresenta ancora un contratto completo di conservazione di ogni proprietà di stile. Una perdita di connessione o un fallimento della pulizia richiede ispezione: non ripetere automaticamente l'update.
 
 ## Prova personale: salvataggio e resume
 

@@ -1,5 +1,7 @@
 # Roadmap: Maquette as an AI terminal
 
+**UX follow-up — 7 November 2026:** `codex/cli-foundations-ux` adds startup and in-process resume, deterministic titles, restored transcript headers, input echo, action/cancellation feedback and compact tool groups. HOT-108 stages chart replacements and refuses detected internal hand changes; HOT-66/95/91 remain outside this follow-up. See [verification and manual trials](docs/cli-foundations-testing.md).
+
 **Implementation update — 7 November 2026:** HOT-56 save/list/resume → HOT-54 MCP/shared runtime → HOT-55 skills → HOT-63 folder-aware init → HOT-56 compaction/change notices are implemented on `codex/cli-foundations` for review. Bet 2 remains the ownership milestone; Bet 1 gates are unchanged. HOT-57/61/65 are excluded. See [testing and limits](docs/cli-foundations-testing.md). Historical phase descriptions below are superseded where they conflict.
 
 Originally `maquette` was a prompt that takes tool calls (`chart_create firstlight:slot:01 @spec.json`) and an HTTP server that lets other terminals and Claude Code sessions drive the same DesignCraft document. To do anything with a model you open a second terminal, run `claude`, and paste the "driving it from another session" prompt.
