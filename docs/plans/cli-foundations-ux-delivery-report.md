@@ -54,3 +54,13 @@ HOT-66 conserva la futura preservazione delle proprietà di stile; HOT-95 valori
 I controlli con server locali richiedono un ambiente che consenta loopback; quelli DesignCraft richiedono il binario macOS fissato dal progetto. Nessun push, PR, merge, rilascio o pubblicazione npm eseguito.
 
 Istruzioni ripetibili: [guida personale](../cli-foundations-testing.md).
+
+## Follow-up: copie nello scrollback durante il ridimensionamento
+
+Il test iniziale in PTY verificava che la CLI rimanesse utilizzabile, ma non contava le copie del contenuto già stampato. La segnalazione dell'utente ha rivelato che ogni resize ricreava Ink Static e ristampava tutto il transcript, mentre una seconda callback cancellava il viewport. Cinque eventi di resize producevano sei copie della stessa risposta nello stream terminale.
+
+Rimosse sia la ricreazione di Static sul resize sia la cancellazione manuale del viewport. Ink gestisce il frame attivo e il terminale il riflusso dello scrollback. Il cambio conversazione continua a mostrare una volta lo storico selezionato.
+
+La regressione in `test/unit/terminal-output.test.ts` usa il writer interattivo reale di Ink, una risposta di 80 righe e variazioni di larghezza/altezza; dopo cinque resize il contenuto deve rimanere stampato una sola volta, senza cancellare lo storico. `ink-testing-library` usa debug mode e ristampa intenzionalmente il frame completo: il suo ultimo frame non è una verifica delle scritture nello scrollback.
+
+Passati typecheck/build, tutti i 134 unit test e smoke. Anche la build compilata in PTY mantiene una sola copia di 80 righe attraverso cinque resize; input, dettaglio, interruzione shell e ripresa restano funzionanti. La ripresa visualizza lo storico selezionato una sola volta aggiuntiva. Artefatti: `/var/folders/y_/ph41165j66j4hzn0n77vbg040000gn/T/maquette-pty-d7xgkcqu`; script e stream in `/tmp/maquette-resize-check.py` e `/tmp/maquette-resize-output.txt`.

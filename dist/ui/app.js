@@ -25,12 +25,11 @@ export function App({ session, server, info, onExit }) {
     const { stdout } = useStdout();
     const [columns, setColumns] = useState(stdout.columns || 80);
     const [generation, setGeneration] = useState(0);
-    // After a resize the screen has been cleared (see runApp), so draw everything again at the
-    // new width: the transcript through a fresh <Static>, and the live part as usual.
+    // The terminal reflows committed scrollback; Ink redraws only the live frame.
+    // Remounting <Static> here would append the entire history again on every resize.
     useEffect(() => {
         const onResize = () => {
             setColumns(stdout.columns || 80);
-            setGeneration((g) => g + 1);
         };
         stdout.on("resize", onResize);
         return () => void stdout.off("resize", onResize);
@@ -183,11 +182,6 @@ export function App({ session, server, info, onExit }) {
 export async function runApp(session, server, info) {
     const { render } = await import("ink");
     let left = false;
-    // When the window changes size, the terminal rewraps the rows already on screen, so Ink's
-    // count of the frame's rows no longer holds and pieces are left behind. Clear what's visible
-    // first (what was above stays in the scrollback); Ink's own resize handler, registered after
-    // this one, then draws the live frame afresh at the top. Same as Claude Code.
-    process.stdout.on("resize", () => process.stdout.write("\x1b[2J\x1b[H"));
     const instance = render(h(App, { session, server, info, onExit: () => (left = true) }), { exitOnCtrlC: false, patchConsole: true });
     await instance.waitUntilExit();
     if (!left)

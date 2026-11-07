@@ -58,8 +58,8 @@ export function renderItem(item: Item, root: string): ReactNode {
   }
 }
 
-// `generation` changes on a window resize: a fresh <Static> writes every item again, so the
-// whole transcript comes back, laid out at the new width, after the screen was cleared.
+// Reset only when selecting a different conversation, whose saved output must be displayed.
+// Keep the same <Static> through resizes so committed history is never appended again.
 export function Transcript({ items, root, generation = 0 }: { items: Item[]; root: string; generation?: number }) {
   return h(Static<Item>, { key: generation, items, children: (item: Item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
 }

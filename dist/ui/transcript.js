@@ -55,8 +55,8 @@ export function renderItem(item, root) {
             return h(Box, { paddingLeft: 2 }, h(Text, { color: item.level === "error" ? "red" : item.level === "warn" ? "yellow" : undefined, dimColor: item.level === "info" }, item.text));
     }
 }
-// `generation` changes on a window resize: a fresh <Static> writes every item again, so the
-// whole transcript comes back, laid out at the new width, after the screen was cleared.
+// Reset only when selecting a different conversation, whose saved output must be displayed.
+// Keep the same <Static> through resizes so committed history is never appended again.
 export function Transcript({ items, root, generation = 0 }) {
     return h((Static), { key: generation, items, children: (item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
 }

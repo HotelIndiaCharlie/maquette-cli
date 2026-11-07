@@ -52,7 +52,7 @@ Premi Ctrl-O dopo un tool: appare un pannello di dettaglio, richiudibile con Ctr
 
 Esegui `!sleep 20`, attendi **Running shell command...**, poi Ctrl-C o Esc: deve comparire **Interrupted.** e tornare il prompt. Dopo diversi turni completi esegui `/compact` e interrompilo durante **Compacting conversation...**: il contesto precedente deve restare utilizzabile. Durante una chiamata tool non cancellabile, l'interruzione mostra **Stopping after the current call...** fino al risultato effettivo. Un altro input già accodato deve poi essere eseguito.
 
-Ridimensiona il terminale fra circa 110 e 44 colonne, con una risposta e un dettaglio visibili, poi ripeti `/resume`. Il ridisegno deve mantenere prompt e stato utilizzabili; controlla personalmente la leggibilità nel tuo emulatore. Le etichette CLI sono inglesi; input, risposte del modello e contenuto restituito dai tool mantengono la loro lingua.
+Ridimensiona più volte il terminale fra circa 110 e 44 colonne, con una risposta lunga già completata e un dettaglio visibili, poi ripeti `/resume`. Prompt e stato devono rimanere utilizzabili e lo scrollback non deve accumulare nuove copie della risposta a ogni ridimensionamento. Il terminale gestisce il riflusso dello storico; solo il cambio conversazione ristampa lo storico selezionato. Controlla personalmente la leggibilità nel tuo emulatore. Le etichette CLI sono inglesi; input, risposte del modello e contenuto restituito dai tool mantengono la loro lingua.
 
 ## Prova personale della sicurezza chart_update
 
