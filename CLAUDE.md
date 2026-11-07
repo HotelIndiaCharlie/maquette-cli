@@ -53,6 +53,10 @@ Inside the process:
 
 Work is tracked in Linear: project **Maquette CLI** (team `HOT`, issues `HOT-<n>`), https://linear.app/hotelindiajuliet/project/maquette-cli-be83f556f33d. The project description links to the planning rules, the decision log, the current bet's spec and "Maquette tools: what exists today". Read that last one before proposing a tool. Fetch these documents and issues only when the task needs them; don't copy their content here or into commits.
 
+Two agents work in this project, Claude and Codex. The rules they share (labels, signing, editing shared documents, decision numbers) are in `AGENTS.md`:
+
+@AGENTS.md
+
 For every piece of work:
 
 1. **Find or create the issue first.** Check `list_issues` for a duplicate. If you create one, put it in the project and the right milestone.
