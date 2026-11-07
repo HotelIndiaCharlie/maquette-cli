@@ -23,6 +23,7 @@
     "test:all": "npm run test:unit && npm run smoke && npm test",
     "smoke": "node test/smoke.ts",
     "test:foundations:live": "node test/foundations-live.ts",
+    "test:chart-safety:live": "node test/chart-safety-live.ts",
     "test:package": "node test/package-install.ts"
   },
   "engines": {
