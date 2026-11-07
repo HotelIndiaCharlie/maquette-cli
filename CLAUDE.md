@@ -20,7 +20,7 @@ npm test                       # draws the five example charts through the real 
 npm run build                  # tsc: src/ → dist/
 ```
 
-CI (`.github/workflows/test.yml`) runs typecheck, test:unit and smoke on Linux and macOS. It also **fails if `dist/` differs from a fresh build**. `dist/` is committed so that installing from GitHub needs no build. Any change to `src/` needs `npm run build` and the updated `dist/` in the same commit.
+CI (`.github/workflows/test.yml`) runs typecheck, test:unit, smoke and a build on Linux and macOS. `dist/` is committed so that installing from GitHub needs no build, but **only on `main`**: the "Build dist" Action (`.github/workflows/dist.yml`) rebuilds and commits it after every merge. Don't commit `dist/` on a branch; a PR that changes it fails `.github/workflows/pr-rules.yml`. Run `npm run build` to check the build, then leave `dist/` out.
 
 `npm run dev -- --trace` traces each turn to Phoenix in Docker (`docs/telemetry.md`).
 
@@ -53,7 +53,7 @@ Inside the process:
 
 Work is tracked in Linear: project **Maquette CLI** (team `HOT`, issues `HOT-<n>`), https://linear.app/hotelindiajuliet/project/maquette-cli-be83f556f33d. The project description links to the planning rules, the decision log, the current bet's spec and "Maquette tools: what exists today". Read that last one before proposing a tool. Fetch these documents and issues only when the task needs them; don't copy their content here or into commits.
 
-Two agents work in this project, Claude and Codex. The rules they share (labels, signing, editing shared documents, decision numbers) are in `AGENTS.md`:
+Two agents work in this project, Claude and Codex. The rules they share (labels, signing, the git workflow, editing shared documents, decision numbers) are in `AGENTS.md`:
 
 @AGENTS.md
 
@@ -61,6 +61,6 @@ For every piece of work:
 
 1. **Find or create the issue first.** Check `list_issues` for a duplicate. If you create one, put it in the project and the right milestone.
 2. **Start:** set the issue to **In Progress**. Read the Handover comments on its parent and on the last Done sibling (the `linear-handover` skill in `.claude/skills/` describes how).
-3. **Branch** with the issue's Linear `gitBranchName` (e.g. `davidebelo/hot-82-agent-guide-claudemd-with-commands`), so Linear links the branch and the PR by itself. If the session forces another branch name, still put `HOT-<n>` in the commit messages and the PR title.
-4. **Commit messages** end with `(HOT-<n>)`, as in the existing history.
-5. **Finish:** set the issue to **In Review** when a PR is open, or **Done** when the work is merged or needs no review. Post the `## Handover` comment (linear-handover skill) with links to the branch, commit or PR instead of repeating them. Put long agent detail in a collapsible `+++ Agent notes` section, not in the human-readable text.
+3. **Branch** with the issue's Linear `gitBranchName` (e.g. `davidebelo/hot-82-agent-guide-claudemd-with-commands`), so Linear links the branch and the PR by itself, in its own worktree, stacked on the branch it depends on if any ("Git workflow" in `AGENTS.md`). If the session forces another branch name, still put `HOT-<n>` in the commit messages and the PR title.
+4. **Commit messages** end with `(HOT-<n>)`, as in the existing history. Commit before the turn ends, push, and open a draft PR.
+5. **Finish:** mark the PR ready and set the issue to **In Review**, or **Done** when the work is merged or needs no review. Post the `## Handover` comment (linear-handover skill) with links to the branch, commit or PR instead of repeating them. Put long agent detail in a collapsible `+++ Agent notes` section, not in the human-readable text.
