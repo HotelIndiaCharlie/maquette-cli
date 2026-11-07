@@ -24,6 +24,7 @@ const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
 const usage = `Usage (mqt is short for maquette and takes the same commands):
   maquette                               start DesignCraft in this folder, with a prompt: sentences go to the model, tool calls run directly
+  maquette --resume [id]                resume the latest or a specific saved conversation
   maquette call <tool> [--flag value …]  call a tool on the running Maquette
   maquette tools [<tool>]                list the tools, or show one tool's flags
   maquette example                       copy the example report into ./example/
@@ -58,6 +59,12 @@ function option(name, takesValue = false, from = argv) {
     if (a.includes("="))
         return a.slice(a.indexOf("=") + 1);
     return takesValue ? (from.splice(i, 1)[0] ?? fail(`--${name} needs a value.`)) : "";
+}
+let resume;
+const resumeIndex = argv.findIndex(a => a === "--resume" || a.startsWith("--resume="));
+if (resumeIndex >= 0) {
+    const [flag] = argv.splice(resumeIndex, 1);
+    resume = flag.includes("=") ? flag.slice(9) : argv[resumeIndex] && !argv[resumeIndex].startsWith("-") ? argv.splice(resumeIndex, 1)[0] : true;
 }
 const portFlag = option("port", true);
 const asJson = option("json") !== undefined;
@@ -140,6 +147,8 @@ async function serve() {
     if (running)
         fail(`Maquette is already running on port ${port}, in ${tilde(running.root ?? "another folder")}. Send it calls with \`maquette call\`, or start another with --port.`);
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    if (resume && !interactive)
+        fail("--resume requires the interactive terminal prompt.");
     // With a screen, the banner is the first thing the screen draws, so nothing is drawn twice.
     if (!interactive)
         console.log(bannerText());
@@ -159,12 +168,14 @@ async function serve() {
     const server = await startServer({ port, version, cli, engine }).catch((e) => fail(`  ${e.message}`));
     const root = server.root;
     let stopping = false;
+    let session;
     let tracing;
     const stop = async (code = 0) => {
         if (stopping)
             process.exit(1);
         stopping = true;
         console.log("\n  Stopping DesignCraft.");
+        session?.close();
         await tracing?.shutdown();
         await server.stop();
         process.exit(code);
@@ -200,7 +211,7 @@ async function serve() {
     }
     const { AgentSession } = await import("./agent/session.js");
     const { runApp } = await import("./ui/app.js");
-    const session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample });
+    session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume });
     const traced = await trace(server, session, (text, level) => session.notice(text, level));
     tracing = traced.tracing;
     process.on("SIGTERM", () => void stop());

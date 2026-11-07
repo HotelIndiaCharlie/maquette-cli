@@ -1,6 +1,10 @@
 // The agent loop behind the prompt. One session holds the conversation, the permission mode
 // and the provider; `submit` takes a typed line and does what it means, emitting events for
 // whoever draws them. Model tool calls go through the server's queue like every other call.
+import { randomUUID } from "node:crypto";
+import { SessionJournal, listSessions } from "./sessions.ts";
+import { providerView } from "./context.ts";
+import { classify } from "./permissions.ts";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -35,6 +39,8 @@ export type SessionOptions = {
   provider?: Provider; // in place of the one the settings name, for tests
   projectFile: string; // the project's settings file, where /permissions persists the mode
   copyExample?: (root: string) => string;
+  persist?: boolean;
+  resume?: string | true;
 };
 
 const promptHelp = `Type a sentence and the model does the job, calling tools as it goes. Or type a tool's name and
@@ -96,6 +102,9 @@ export class AgentSession {
   textProtocol = false;
   busy = false;
   totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, priced: 0, turns: 0 };
+  journal?: SessionJournal;
+  needsInspection = false;
+  #resumeWarnings: string[] = [];
   #listeners = new Set<(e: AgentEvent) => void>();
   #abort?: AbortController;
   #interrupted = false;
@@ -114,7 +123,23 @@ export class AgentSession {
     this.projectFile = options.projectFile;
     this.mode = options.settings.permissions.mode;
     this.#copyExample = options.copyExample;
+    if (options.persist || options.resume) {
+      this.journal = new SessionJournal(this.server.root, { resume: options.resume, provider: this.provider.name, model: this.provider.model });
+      if (options.resume) {
+        const restored = this.journal.restore();
+        this.history = restored.messages;
+        this.needsInspection = true;
+        this.#resumeWarnings = [...this.journal.warnings, `Resumed ${this.journal.id}. Conversation restored; permissions and document state are not restored. Inspect the current document before editing. Unsaved layout changes may be lost.`, ...(restored.uncertain ? ["A call has an unknown outcome. It was not replayed; inspect current state."] : [])];
+      }
+    }
   }
+
+  commit(message: Message) {
+    this.journal?.append("message", message);
+    this.history.push(message);
+  }
+
+  close() { this.journal?.close(); }
 
   on(listener: (e: AgentEvent) => void): () => void {
     this.#listeners.add(listener);
@@ -156,6 +181,7 @@ export class AgentSession {
   }
 
   async handle(line: string) {
+    for (const warning of this.#resumeWarnings.splice(0)) this.notice(warning, "warn");
     const r = route(line, (w) => this.server.byName.has(w));
     switch (r.kind) {
       case "empty":
@@ -203,11 +229,15 @@ export class AgentSession {
     }
     this.busy = true;
     try {
+      const id = randomUUID();
+      this.journal?.append("call_start", { id, name, args, source: "prompt" });
       const reply = await this.server.enqueue(name, args, "prompt");
+      this.journal?.append("call_result", { id, reply });
+      if (reply.ok && classify(tool) === "read" && /^(inspect|document_survey)/.test(name)) this.needsInspection = false;
       this.emit({ type: "output", text: reply.text, ok: reply.ok, images: reply.images });
       this.warnOnOpen(name, reply);
       const seen = `The person ran \`${name} ${rest.trim()}\` at the prompt; it ${reply.ok ? "returned" : "failed with"}: ${gist(reply.text, 2000)}${reply.images.map((p) => `\nimage: ${p}`).join("")}`;
-      this.history.push({ role: "user", parts: [{ type: "text", text: seen }] });
+      this.commit({ role: "user", parts: [{ type: "text", text: seen }] });
     } finally {
       this.busy = false;
     }
@@ -218,9 +248,12 @@ export class AgentSession {
     this.busy = true;
     this.#abort = new AbortController();
     try {
+      const id = randomUUID();
+      this.journal?.append("shell_start", { id, command });
       const { output, code } = await runShell(command, this.server.root, { signal: this.#abort.signal });
+      this.journal?.append("shell_result", { id, output, code });
       this.emit({ type: "shell", command, output, code });
-      this.history.push({ role: "user", parts: [{ type: "text", text: `The person ran \`${command}\` in the shell, in ${this.server.root}${code === 0 ? "" : ` (exit code ${code ?? "none"})`}:\n${output || "(no output)"}` }] });
+      this.commit({ role: "user", parts: [{ type: "text", text: `The person ran \`${command}\` in the shell, in ${this.server.root}${code === 0 ? "" : ` (exit code ${code ?? "none"})`}:\n${output || "(no output)"}` }] });
     } finally {
       this.busy = false;
       this.#abort = undefined;
@@ -231,7 +264,14 @@ export class AgentSession {
     const { settings } = this;
     if (name === "help") return this.emit({ type: "output", text: slashHelp });
     if (name === "tools") return this.emit({ type: "output", text: catalogue(this.server.tools) });
+    if (name === "sessions") return this.emit({ type: "output", text: listSessions(this.server.root).map(s => s.error ? `${s.id}: ${s.error}` : `${s.id}  ${s.date}  ${s.provider}/${s.model}  ${s.first}`).join("\n") || "No sessions here yet." });
     if (name === "clear") {
+      if (this.journal) {
+        this.journal.close();
+        this.journal = new SessionJournal(this.server.root, { provider: this.provider.name, model: this.provider.model });
+      }
+      this.allowed.clear();
+      this.needsInspection = false;
       this.history = [];
       this.textProtocol = false;
       this.#sentProject = undefined;
@@ -320,6 +360,7 @@ export class AgentSession {
     try {
       this.provider = createProvider(settings);
       this.settings = settings;
+      this.journal?.append("provider", { provider: this.provider.name, model: this.provider.model });
       this.textProtocol = false;
       this.notice(`Now using ${this.provider.model || "(no model set)"} from ${this.provider.name}.`);
     } catch (e) {
@@ -368,7 +409,7 @@ export class AgentSession {
   // results, until it answers without calling anything.
   // `shown` is what the transcript shows for it, when that isn't the text itself.
   async turn(text: string, shown = text) {
-    this.history.push({ role: "user", parts: [...this.readProject(), { type: "text", text }] });
+    this.commit({ role: "user", parts: [...this.readProject(), { type: "text", text }] });
     this.emit({ type: "user", text: shown });
     this.busy = true;
     this.#interrupted = false;
@@ -381,7 +422,7 @@ export class AgentSession {
       for (;;) {
         let done;
         let soFar = "";
-        const request = { system: this.system(), messages: this.history, tools: this.textProtocol ? undefined : this.toolSpecs() };
+        const request = { system: this.system(), messages: providerView(this.history, this.provider.name, this.provider.model), tools: this.textProtocol ? undefined : this.toolSpecs() };
         const started = Date.now();
         const end = (fields: { failure?: Failure; error?: string } = {}) => this.emit({ type: "step_end", step, ms: Date.now() - started, ...fields });
         this.emit({ type: "step_start", step: ++step, provider: this.provider.name, model: this.provider.model, request });
@@ -396,7 +437,8 @@ export class AgentSession {
           }
         } catch (e) {
           if (this.#interrupted || this.#abort.signal.aborted) {
-            if (soFar) this.history.push({ role: "assistant", parts: [{ type: "text", text: soFar }] });
+            this.journal?.append("interrupted", { partialText: soFar });
+            if (soFar) this.commit({ role: "assistant", parts: [{ type: "text", text: soFar }] });
             end({ failure: "user.interrupted" });
             interrupted = true;
             break;
@@ -413,12 +455,15 @@ export class AgentSession {
           break;
         }
         if (!done) {
+          this.journal?.append("interrupted", { partialText: soFar });
           end({ failure: "provider.no_reply" });
           break;
         }
         const failure = done.stop === "refusal" ? "model.refusal" : done.stop === "max_tokens" ? "model.max_tokens" : undefined;
         this.emit({ type: "step_end", step, ms: Date.now() - started, message: done.message, stop: done.stop, model: done.model, usage: done.usage, thinking: done.thinking, ...(failure ? { failure, error: done.detail } : {}) });
-        this.history.push(done.message);
+        if (done.message.native) done.message.native.model = done.model;
+        this.commit(done.message);
+        this.journal?.append("usage", { model: done.model, usage: done.usage, stop: done.stop });
         this.account(done.model, done.usage);
         this.sendStatus();
         ({ stop, usage } = done);
@@ -429,8 +474,8 @@ export class AgentSession {
         const results = await this.runCalls(calls);
         if (this.textProtocol) {
           const parts = results.flatMap((r) => [{ type: "text", text: `Result of \`maquette call ${r.name}\`:\n${r.content.filter((c) => c.type === "text").map((c) => (c as TextPart).text).join("\n")}` } as TextPart, ...r.content.filter((c): c is ImagePart => c.type === "image")]);
-          this.history.push({ role: "user", parts });
-        } else this.history.push({ role: "user", parts: results });
+          this.commit({ role: "user", parts });
+        } else this.commit({ role: "user", parts: results });
         if (this.#interrupted) {
           interrupted = true;
           break;
@@ -497,6 +542,10 @@ export class AgentSession {
         fail(`There's no tool "${call.name}".`, "model.unknown_tool");
         continue;
       }
+      if (this.needsInspection && classify(tool) !== "read") {
+        fail("Inspect the current document first (inspect_document or document_survey); restored conversations and change notices do not establish current state.", "policy.plan_denied");
+        continue;
+      }
       const decision = this.textProtocol ? "ask" : decide(this.mode, tool, this.allowed);
       if (decision === "deny") {
         fail("Plan mode: this call would change something, so it wasn't run. Describe it in your plan instead.", "policy.plan_denied");
@@ -519,7 +568,10 @@ export class AgentSession {
         }
       }
       const queued = Date.now();
+      this.journal?.append("call_start", { id: call.id, name: call.name, args: call.input, source: "model" });
       const reply = await this.server.enqueue(call.name, call.input, "model");
+      this.journal?.append("call_result", { id: call.id, reply });
+      if (reply.ok && /^(inspect_document|document_survey)$/.test(call.name)) this.needsInspection = false;
       const timing = { permission: waited, queue: Math.max(0, Date.now() - queued - reply.ms), run: reply.ms };
       this.emit({ type: "tool_result", id: call.id, name: call.name, ok: reply.ok, text: reply.text, images: reply.images, ms: reply.ms, timing, permission, ...(reply.ok ? {} : { failure: "tool.error" as const }) });
       this.warnOnOpen(call.name, reply);

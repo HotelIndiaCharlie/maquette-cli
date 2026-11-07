@@ -11,7 +11,7 @@ export type ImagePart = { type: "image"; mediaType: string; data: string; path?:
 export type ToolCallPart = { type: "tool_call"; id: string; name: string; input: Record<string, unknown>; error?: string };
 export type ToolResultPart = { type: "tool_result"; id: string; name: string; content: (TextPart | ImagePart)[]; isError?: boolean };
 
-export type Native = { provider: string; content: unknown };
+export type Native = { provider: string; model?: string; content: unknown };
 export type UserMessage = { role: "user"; parts: (TextPart | ImagePart | ToolResultPart)[] };
 export type AssistantMessage = { role: "assistant"; parts: (TextPart | ToolCallPart)[]; native?: Native };
 export type Message = UserMessage | AssistantMessage;
