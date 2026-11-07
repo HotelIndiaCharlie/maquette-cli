@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { relative, resolve } from "node:path";
 
 export type Prop = { type?: string | string[]; description?: string };
-export type Tool = { name: string; description?: string; inputSchema: { properties?: Record<string, Prop>; required?: string[] }; annotations?: { readOnlyHint?: boolean } };
+export type Tool = { _maquette?: { server: string; identity: string }; name: string; description?: string; inputSchema: { properties?: Record<string, Prop>; required?: string[] }; annotations?: { readOnlyHint?: boolean } };
 
 export const two = (n: number) => String(n).padStart(2, "0");
 export const clock = (d = new Date()) => `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;

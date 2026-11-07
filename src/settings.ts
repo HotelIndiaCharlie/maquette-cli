@@ -3,12 +3,13 @@
 // in, environment variables, then command-line flags. `maquette config` shows the result and
 // where each value came from; `maquette config set` writes one key. API keys never go in these
 // files: a provider names the environment variable that holds its key.
+import { validateMcpMap, loadMcpConfig, type McpConfig } from "./mcp/config.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export type Source = "default" | "user" | "project" | "env" | "flag";
-type Kind = "string" | "number" | "boolean";
+type Kind = "string" | "number" | "boolean" | "object";
 type Spec = { kind: Kind; default?: unknown; choices?: readonly string[]; min?: number; max?: number; env?: string; about: string };
 
 export const providerNames = ["anthropic", "openai-compatible"] as const;
@@ -18,6 +19,7 @@ export const permissionModes = ["ask", "auto", "plan"] as const;
 
 // Every setting, by its dotted key.
 export const schema: Record<string, Spec> = {
+  mcpServers: { kind: "object", default: {}, about: "MCP server map; whole entries replace by name: user < .mcp.json < project settings. Project entries require /mcp trust." },
   provider: { kind: "string", default: "anthropic", choices: providerNames, env: "MAQUETTE_PROVIDER", about: "Which model provider to use" },
   model: { kind: "string", env: "MAQUETTE_MODEL", about: "The model's id; unset means the provider's default (anthropic: claude-opus-5-5)" },
   port: { kind: "number", default: 8787, min: 1, max: 65535, env: "MAQUETTE_PORT", about: "The local port Maquette listens on for other sessions" },
@@ -36,6 +38,7 @@ export const schema: Record<string, Spec> = {
 };
 
 export type Settings = {
+  mcpServers: Record<string, McpConfig>;
   provider: ProviderName;
   model?: string;
   port: number;
@@ -65,6 +68,7 @@ export function files(where: Where = {}) {
 // The dotted keys and values of a JSON object: {"providers": {"anthropic": {"effort": "low"}}}
 // gives providers.anthropic.effort = "low".
 function flatten(value: unknown, prefix = "", out: Record<string, unknown> = {}): Record<string, unknown> {
+  if (prefix === "mcpServers") { out[prefix] = value; return out; }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
   } else if (prefix) out[prefix] = value;
@@ -73,6 +77,7 @@ function flatten(value: unknown, prefix = "", out: Record<string, unknown> = {})
 
 function check(key: string, value: unknown, where: string): unknown {
   const spec = schema[key];
+  if (key === "mcpServers") { try { return validateMcpMap(value); } catch { throw new SettingsError(`Invalid mcpServers (${where}); check server fields. Values hidden.`); } }
   const bad = (why: string) => new SettingsError(`${key} ${why} (${where}).`);
   if (typeof value !== spec.kind) throw bad(`must be a ${spec.kind}, not ${JSON.stringify(value)}`);
   if (spec.choices && !spec.choices.includes(value as string)) throw bad(`must be one of ${spec.choices.join(", ")}, not "${value}"`);
@@ -88,6 +93,9 @@ function check(key: string, value: unknown, where: string): unknown {
 export function parse(key: string, raw: string, where = "command line"): unknown {
   const spec = schema[key];
   if (!spec) throw new SettingsError(`There's no setting "${key}". \`maquette config\` lists them.`);
+  if (spec.kind === "object") {
+    try { return check(key, JSON.parse(raw), where); } catch { throw new SettingsError(`Invalid ${key} JSON configuration (${where}); values hidden.`); }
+  }
   if (spec.kind === "number") {
     if (raw.trim() === "" || Number.isNaN(Number(raw))) throw new SettingsError(`${key} must be a number, not "${raw}" (${where}).`);
     return check(key, Number(raw), where);
@@ -139,6 +147,7 @@ export function load(where: Where = {}): Loaded {
         warnings.push(`${path} has a setting Maquette doesn't know, "${key}"; it's ignored.`);
         continue;
       }
+      if (key === "mcpServers") continue;
       take(key, () => check(key, value, path), { source, path });
     }
   }
@@ -158,6 +167,9 @@ export function load(where: Where = {}): Loaded {
     for (const k of path.slice(0, -1)) into = (into[k] ??= {}) as Record<string, unknown>;
     into[path.at(-1)!] = value;
   }
+  const mcp = loadMcpConfig(where.cwd ?? process.cwd(), where.home);
+  settings.mcpServers = Object.fromEntries(mcp.entries.filter(e => e.config).map(e => [e.name, e.config]));
+  warnings.push(...mcp.warnings, ...mcp.entries.filter(e => e.error).map(e => e.error!));
   return { settings: settings as Settings, origins, files: paths, warnings };
 }
 

@@ -5,7 +5,7 @@ import { gist, tilde } from "../args.ts";
 import { Box, h, type ReactNode, Static, Text } from "./h.ts";
 import { Markdown } from "./markdown.ts";
 
-export type ToolItem = { kind: "tool"; id: string; name: string; input: Record<string, unknown>; source: "prompt" | "model" | "http"; done: boolean; ok?: boolean; text?: string; images?: string[]; ms?: number; expanded?: boolean };
+export type ToolItem = { kind: "tool"; id: string; name: string; input: Record<string, unknown>; source: "prompt" | "model" | "http" | "mcp"; done: boolean; ok?: boolean; text?: string; images?: string[]; ms?: number; expanded?: boolean };
 export type ItemBody =
   | { kind: "banner"; lines: string[] }
   | { kind: "user"; text: string }

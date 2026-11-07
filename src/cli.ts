@@ -5,6 +5,9 @@
 // model and tool calls run directly. Calls run one at a time, all on the same open document.
 // `call` and `tools` are its clients. `config` shows and changes the settings, and `ask` and
 // `models` talk to the model they name.
+import { ensureRuntime } from "./runtime/connect.ts";
+import { redactedMcp } from "./mcp/config.ts";
+import { serveBridge } from "./mcp/bridge.ts";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -145,8 +148,6 @@ function logLine(e: Extract<ServerEvent, { type: "call" }>, root: string): strin
 }
 
 async function serve() {
-  const running = await fetch(`http://127.0.0.1:${port}/tools`).then((r) => r.json(), () => undefined);
-  if (running) fail(`Maquette is already running on port ${port}, in ${tilde(running.root ?? "another folder")}. Send it calls with \`maquette call\`, or start another with --port.`);
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (resume && !interactive) fail("--resume requires the interactive terminal prompt.");
   // With a screen, the banner is the first thing the screen draws, so nothing is drawn twice.
@@ -155,15 +156,11 @@ async function serve() {
   // use one that needs no DesignCraft.
   const engine = process.env.MAQUETTE_ENGINE || undefined;
   let cli: string | undefined;
-  if (!engine) {
-    try {
-      cli = findDesignCraft(settings.designcraft);
-    } catch (e) {
-      fail(`  ${(e as Error).message}`);
-    }
-    cli ??= await offerInstall();
-  }
-  const server = await startServer({ port, version, cli, engine }).catch((e: Error) => fail(`  ${e.message}`));
+  const { server, owned } = await ensureRuntime({ port, version }, async () => {
+    if (!engine) { cli = findDesignCraft(settings.designcraft) ?? await offerInstall(); }
+    return { cli, engine };
+  }).catch((e: Error) => fail(e.message));
+  if (!owned && !interactive) fail(`Maquette is already running on port ${port}. Connect with maquette mcp, or use the interactive terminal.`);
   const root = server.root;
   let stopping = false;
   let session: AgentSession | undefined;
@@ -180,7 +177,7 @@ async function serve() {
   server.on((e) => {
     if (e.type === "engine_closed" && !stopping) fail("The engine has stopped, so Maquette stops too.");
   });
-  const engineName = engine ? `Engine ${shortPath(engine)}` : cli === pinned ? `DesignCraft ${pin.version} CLI` : `DesignCraft CLI at ${tilde(cli!)}`;
+  const engineName = !owned ? "Shared Maquette runtime" : engine ? `Engine ${shortPath(engine)}` : cli === pinned ? `DesignCraft ${pin.version} CLI` : `DesignCraft CLI at ${tilde(cli!)}`;
   const hint = !readdirSync(root).some((f) => f.endsWith(".designcraft")) ? `No document here yet? ${paint(36, "example")} copies in an example report.` : undefined;
 
   if (!interactive) {
@@ -331,7 +328,7 @@ function config(args: string[]) {
     if (action === "list") {
       const keys = Object.keys(schema);
       const width = Math.max(...keys.map((k) => k.length));
-      const values = keys.map((k) => shown(k === "model" ? (value(k) ?? defaultModels[settings.provider]) : value(k)));
+      const values = keys.map((k) => shown(k === "mcpServers" ? redactedMcp(settings.mcpServers) : k === "model" ? (value(k) ?? defaultModels[settings.provider]) : value(k)));
       const vwidth = Math.max(...values.map((v) => v.length));
       console.log(`Settings come from ${shortPath(loaded.files.user)}, then ${shortPath(loaded.files.project)},\nthen environment variables and flags; each overrides the one before.\n`);
       keys.forEach((k, i) => {
@@ -356,13 +353,13 @@ function config(args: string[]) {
         console.log(`${paint(1, k)}  ${paint(2, extra)}\n  ${spec.about}`);
       }
     } else if (action === "get") {
-      const v = value(known(key));
+      const v = key === "mcpServers" ? redactedMcp(settings.mcpServers) : value(known(key));
       if (v !== undefined) console.log(typeof v === "string" ? v : JSON.stringify(v));
     } else if (action === "set") {
       if (!words.length) fail(`What value? maquette config set ${known(key)} <value>`);
       const v = parse(known(key), words.join(" "), "maquette config set");
       write(file, key!, v);
-      console.log(`Set ${key} to ${JSON.stringify(v)} in ${shortPath(file)}.`);
+      console.log(`Set ${key} to ${JSON.stringify(key === "mcpServers" ? redactedMcp(v as any) : v)} in ${shortPath(file)}.`);
       const now = load({ lenient: true }).origins.get(key!);
       if (now && now.source !== scope) console.log(paint(33, `It doesn't take effect here: ${now.source === "env" ? `the environment variable ${now.path}` : `${shortPath(now.path!)}`} overrides it.`));
       if (key === "provider" && v === "openai-compatible" && !settings.model) console.log(`Now pick a model: \`maquette models\` lists what the server offers, then \`maquette config set model <id>\`.`);
@@ -449,6 +446,14 @@ for (const warning of loaded.warnings) console.error(paint(33, warning));
 if (wantsVersion) console.log(`maquette ${version} (DesignCraft CLI ${pin.version} pinned)`);
 else if (wantsHelp || command === "help") console.log(usage);
 else if (!command || command === "serve") await serve();
+else if (command === "mcp") {
+  const { server } = await ensureRuntime({ port, version }, async () => {
+    const engine = process.env.MAQUETTE_ENGINE || undefined;
+    const cli = engine ? undefined : findDesignCraft(settings.designcraft) ?? fail("Install DesignCraft first: maquette install-designcraft");
+    return { engine, cli };
+  }).catch((e: Error) => fail(e.message));
+  await serveBridge(server, version);
+}
 else if (command === "call") await call(rest[0], rest.slice(1));
 else if (command === "tools") await listTools(rest[0]);
 else if (command === "example") console.log(copyExample(process.cwd()));

@@ -14,7 +14,9 @@ import { catalogue, describe, gist, parseCall, tilde, type Tool, words, toArgs }
 import { imageType } from "../images.ts";
 import { createProvider, defaultModels } from "../providers/index.ts";
 import { type ImagePart, type Message, type Provider, ProviderError, type SystemBlock, type TextPart, textOf, type ToolCallPart, type ToolResultPart, type ToolSpec, type Usage } from "../providers/types.ts";
-import type { Reply, Source } from "../server.ts";
+import type { McpStatus } from "../mcp/registry.ts";
+import { isTrusted, loadMcpConfig, trustProject } from "../mcp/config.ts";
+import type { CallOptions, Reply, Source } from "../server.ts";
 import { providerNames, type Settings, write } from "../settings.ts";
 import { dollars, price } from "./cost.ts";
 import type { AgentEvent, Choice, Failure, PermissionAnswer, Status } from "./events.ts";
@@ -30,7 +32,11 @@ export type ServerLike = {
   byName: Map<string, Tool>;
   instructions: string;
   lastImage(): string | undefined;
-  enqueue(tool: string, args: Record<string, unknown>, source: Source): Promise<Reply>;
+  enqueue(tool: string, args: Record<string, unknown>, source: Source, options?: CallOptions): Promise<Reply>;
+  refresh?(): Promise<void>;
+  revision?: number;
+  mcpStatus?(): Promise<McpStatus[]>;
+  reconnect?(name: string): Promise<void>;
 };
 
 export type SessionOptions = {
@@ -104,6 +110,9 @@ export class AgentSession {
   totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, priced: 0, turns: 0 };
   journal?: SessionJournal;
   needsInspection = false;
+  caller = `session:${randomUUID()}`;
+  #toolSnapshot = new Map<string, Tool>();
+  #registryRevision?: number;
   #resumeWarnings: string[] = [];
   #listeners = new Set<(e: AgentEvent) => void>();
   #abort?: AbortController;
@@ -231,7 +240,7 @@ export class AgentSession {
     try {
       const id = randomUUID();
       this.journal?.append("call_start", { id, name, args, source: "prompt" });
-      const reply = await this.server.enqueue(name, args, "prompt");
+      const reply = await this.server.enqueue(name, args, "prompt", { caller: this.caller });
       this.journal?.append("call_result", { id, reply });
       if (reply.ok && classify(tool) === "read" && /^(inspect|document_survey)/.test(name)) this.needsInspection = false;
       this.emit({ type: "output", text: reply.text, ok: reply.ok, images: reply.images });
@@ -264,6 +273,20 @@ export class AgentSession {
     const { settings } = this;
     if (name === "help") return this.emit({ type: "output", text: slashHelp });
     if (name === "tools") return this.emit({ type: "output", text: catalogue(this.server.tools) });
+    if (name === "mcp") {
+      const [action, server] = args.split(/\s+/);
+      if (action === "trust") {
+        const c = loadMcpConfig(this.server.root);
+        if (isTrusted(c)) return this.notice("Current project MCP configuration is already trusted.");
+        const servers = c.entries.filter(e => e.source === "project").map(e => `${e.name} (${e.config?.type ?? "invalid"})`).join(", ");
+        const answer = await this.choose(`Trust executable MCP configuration in ${c.root}? Servers: ${servers}. Hash: ${c.projectHash}`, [{ id: "no", label: "Do not trust" }, { id: "yes", label: "Trust this exact project configuration" }], "no");
+        if (answer === "yes") { trustProject(c); this.notice("Project MCP configuration trusted. Reconnect its servers with /mcp reconnect <name>."); }
+        return;
+      }
+      if (action === "reconnect" && server) { await this.server.reconnect?.(server); this.allowed.clear(); }
+      const statuses = await this.server.mcpStatus?.() ?? [];
+      return this.emit({ type: "output", text: statuses.map(s => `${s.name}: ${s.state}, ${s.transport}, ${s.source}, ${s.tools} tools${s.message ? ` — ${s.message}` : ""}`).join("\n") || "No external MCP servers configured. DesignCraft is built in." });
+    }
     if (name === "sessions") return this.emit({ type: "output", text: listSessions(this.server.root).map(s => s.error ? `${s.id}: ${s.error}` : `${s.id}  ${s.date}  ${s.provider}/${s.model}  ${s.first}`).join("\n") || "No sessions here yet." });
     if (name === "clear") {
       if (this.journal) {
@@ -420,6 +443,9 @@ export class AgentSession {
     let step = 0;
     try {
       for (;;) {
+        await this.server.refresh?.();
+        if (this.#registryRevision !== this.server.revision) { this.allowed.clear(); this.#registryRevision = this.server.revision; }
+        this.#toolSnapshot = new Map(this.server.tools.map(t => [t.name, t]));
         let done;
         let soFar = "";
         const request = { system: this.system(), messages: providerView(this.history, this.provider.name, this.provider.model), tools: this.textProtocol ? undefined : this.toolSpecs() };
@@ -537,7 +563,7 @@ export class AgentSession {
         fail(call.error, "model.bad_args");
         continue;
       }
-      const tool = this.server.byName.get(call.name);
+      const tool = this.#toolSnapshot.get(call.name) ?? this.server.byName.get(call.name);
       if (!tool) {
         fail(`There's no tool "${call.name}".`, "model.unknown_tool");
         continue;
@@ -567,9 +593,13 @@ export class AgentSession {
           continue;
         }
       }
+      const current = this.server.byName.get(call.name);
+      if (current?._maquette?.identity !== tool._maquette?.identity || !current) {
+        fail("Tool identity changed while awaiting permission. Refresh and ask again.", "model.unknown_tool"); continue;
+      }
       const queued = Date.now();
       this.journal?.append("call_start", { id: call.id, name: call.name, args: call.input, source: "model" });
-      const reply = await this.server.enqueue(call.name, call.input, "model");
+      const reply = await this.server.enqueue(call.name, call.input, "model", { caller: this.caller, identity: tool._maquette?.identity });
       this.journal?.append("call_result", { id: call.id, reply });
       if (reply.ok && /^(inspect_document|document_survey)$/.test(call.name)) this.needsInspection = false;
       const timing = { permission: waited, queue: Math.max(0, Date.now() - queued - reply.ms), run: reply.ms };

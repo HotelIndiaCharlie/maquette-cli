@@ -307,6 +307,7 @@ export class Tracing {
     // The model's calls are traced from the agent's events; these are the ones typed at the
     // prompt or sent by other sessions.
     // The event comes as the call finishes, so now is its end.
+    if (e.type !== "call") return;
     const { reply, args } = e;
     if (reply.source === "model") return;
     const end = now;
