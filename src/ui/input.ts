@@ -1,6 +1,7 @@
 // The input box: a framed line with ❯, written on Ink's useInput so it can have history,
 // Tab completion for tools, flags, /commands and paths, a second line with shift+enter, and
 // Claude Code's Ctrl-C: it stops the turn, clears the line, or on an empty line stops Maquette.
+import { discoverSkills } from "../skills/resolver.ts";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -20,7 +21,7 @@ export function complete(value: string, cursor: number, byName: Map<string, Tool
   const first = before.trim().split(/\s+/)[0] ?? "";
   let options: string[];
   let dirs = new Set<string>();
-  if (!head.trim()) options = word.startsWith("/") ? slashCommands : [...promptCommands, ...byName.keys()];
+  if (!head.trim()) options = word.startsWith("/") ? [...slashCommands, ...discoverSkills(root).skills.map(s => `/${s.name}`)] : [...promptCommands, ...byName.keys()];
   else if (first === "help") options = [...byName.keys()];
   else if (first === "/permissions") options = ["ask", "auto", "plan"];
   else if (first === "/provider") options = ["anthropic", "openai-compatible"];
@@ -45,7 +46,7 @@ export function complete(value: string, cursor: number, byName: Map<string, Tool
       options = [];
     }
   } else options = [];
-  const matches = options.filter((o) => o.startsWith(word) && o !== word).sort();
+  const matches = [...new Set(options)].filter((o) => o.startsWith(word) && o !== word).sort();
   if (matches.length === 1) return { options: matches, word, replace: dirs.has(matches[0]) ? matches[0] : `${matches[0]} ` };
   let prefix = matches[0] ?? "";
   for (const m of matches) while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1);
@@ -124,12 +125,12 @@ export function InputBox(props: InputProps) {
       if (key.ctrl && input === "a") return setCursor(0);
       if (key.ctrl && input === "e") return setCursor(value.length);
       if (key.escape) return props.onEscape();
-      const slashes = suggestions(value);
+      const slashes = suggestions(value, props.root);
       if (slashes.length && (key.upArrow || key.downArrow)) {
         st.current.sel = (st.current.sel + (key.upArrow ? slashes.length - 1 : 1)) % slashes.length;
         return update();
       }
-      if (slashes.length && (key.tab || (key.return && !slashCommands.includes(value)))) {
+      if (slashes.length && (key.tab || (key.return && ![...slashCommands, ...discoverSkills(props.root).skills.map(s => `/${s.name}`)].includes(value)))) {
         set(`${slashes[Math.min(st.current.sel, slashes.length - 1)]} `);
         st.current.sel = 0;
         return;
@@ -211,7 +212,7 @@ export function InputBox(props: InputProps) {
     }
     return h(Box, { key: i }, ...parts);
   });
-  const slashes = suggestions(value);
+  const slashes = suggestions(value, props.root);
   const sel = Math.min(st.current.sel, Math.max(0, slashes.length - 1));
   const width = Math.max(0, ...slashes.map((c) => c.length));
   // The rules are the box's own borders, so Ink lays them out to the window's width and
@@ -226,7 +227,7 @@ export function InputBox(props: InputProps) {
 }
 
 // The slash commands that match what's typed so far, while only the command is typed.
-function suggestions(value: string): string[] {
+function suggestions(value: string, root?: string): string[] {
   if (!/^\/\S*$/.test(value)) return [];
-  return slashCommands.filter((c) => c.startsWith(value));
+  return [...new Set([...slashCommands, ...(root ? discoverSkills(root).skills.map(s => `/${s.name}`) : [])])].filter((c) => c.startsWith(value));
 }

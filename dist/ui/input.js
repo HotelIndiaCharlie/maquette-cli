@@ -1,6 +1,7 @@
 // The input box: a framed line with ❯, written on Ink's useInput so it can have history,
 // Tab completion for tools, flags, /commands and paths, a second line with shift+enter, and
 // Claude Code's Ctrl-C: it stops the turn, clears the line, or on an empty line stops Maquette.
+import { discoverSkills } from "../skills/resolver.js";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -16,7 +17,7 @@ export function complete(value, cursor, byName, root) {
     let options;
     let dirs = new Set();
     if (!head.trim())
-        options = word.startsWith("/") ? slashCommands : [...promptCommands, ...byName.keys()];
+        options = word.startsWith("/") ? [...slashCommands, ...discoverSkills(root).skills.map(s => `/${s.name}`)] : [...promptCommands, ...byName.keys()];
     else if (first === "help")
         options = [...byName.keys()];
     else if (first === "/permissions")
@@ -49,7 +50,7 @@ export function complete(value, cursor, byName, root) {
     }
     else
         options = [];
-    const matches = options.filter((o) => o.startsWith(word) && o !== word).sort();
+    const matches = [...new Set(options)].filter((o) => o.startsWith(word) && o !== word).sort();
     if (matches.length === 1)
         return { options: matches, word, replace: dirs.has(matches[0]) ? matches[0] : `${matches[0]} ` };
     let prefix = matches[0] ?? "";
@@ -130,12 +131,12 @@ export function InputBox(props) {
             return setCursor(value.length);
         if (key.escape)
             return props.onEscape();
-        const slashes = suggestions(value);
+        const slashes = suggestions(value, props.root);
         if (slashes.length && (key.upArrow || key.downArrow)) {
             st.current.sel = (st.current.sel + (key.upArrow ? slashes.length - 1 : 1)) % slashes.length;
             return update();
         }
-        if (slashes.length && (key.tab || (key.return && !slashCommands.includes(value)))) {
+        if (slashes.length && (key.tab || (key.return && ![...slashCommands, ...discoverSkills(props.root).skills.map(s => `/${s.name}`)].includes(value)))) {
             set(`${slashes[Math.min(st.current.sel, slashes.length - 1)]} `);
             st.current.sel = 0;
             return;
@@ -226,7 +227,7 @@ export function InputBox(props) {
         }
         return h(Box, { key: i }, ...parts);
     });
-    const slashes = suggestions(value);
+    const slashes = suggestions(value, props.root);
     const sel = Math.min(st.current.sel, Math.max(0, slashes.length - 1));
     const width = Math.max(0, ...slashes.map((c) => c.length));
     // The rules are the box's own borders, so Ink lays them out to the window's width and
@@ -234,8 +235,8 @@ export function InputBox(props) {
     return h(Box, { flexDirection: "column" }, h(Box, { flexDirection: "column", borderStyle: "single", borderLeft: false, borderRight: false, borderDimColor: true }, ...rows), hint ? h(Text, { dimColor: true }, `  ${hint.slice(0, 12).join("  ")}${hint.length > 12 ? "  …" : ""}`) : null, ...slashes.map((c, i) => h(Text, { key: c, color: i === sel ? "cyan" : undefined, bold: i === sel }, `  ${i === sel ? "›" : " "} ${c.padEnd(width)}  `, h(Text, { dimColor: i !== sel, color: i === sel ? "cyan" : undefined }, slashAbout[c]))));
 }
 // The slash commands that match what's typed so far, while only the command is typed.
-function suggestions(value) {
+function suggestions(value, root) {
     if (!/^\/\S*$/.test(value))
         return [];
-    return slashCommands.filter((c) => c.startsWith(value));
+    return [...new Set([...slashCommands, ...(root ? discoverSkills(root).skills.map(s => `/${s.name}`) : [])])].filter((c) => c.startsWith(value));
 }

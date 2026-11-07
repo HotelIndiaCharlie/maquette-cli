@@ -22,7 +22,7 @@ export function projectBlock(text) {
 export function environmentBlock(input) {
     const variables = { root: input.root, tools: input.textProtocol ? catalogue(input.tools) : "", instructions: input.instructions };
     const names = ["environment", ...(input.mode === "plan" ? ["plan-mode"] : []), ...(input.textProtocol ? ["text-protocol"] : []), "engine"];
-    return { name: "environment", text: names.map((n) => fill(n, variables)).join("\n\n"), cache: true, source: source(names, variables) };
+    return { name: "environment", text: [...names.map((n) => fill(n, variables)), ...(input.skills ? [input.skills] : [])].join("\n\n"), cache: true, source: source(names, variables) };
 }
 export const environmentText = (input) => environmentBlock(input).text;
 export function systemPrompt(input) {

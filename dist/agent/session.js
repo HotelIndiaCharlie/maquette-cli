@@ -1,6 +1,7 @@
 // The agent loop behind the prompt. One session holds the conversation, the permission mode
 // and the provider; `submit` takes a typed line and does what it means, emitting events for
 // whoever draws them. Model tool calls go through the server's queue like every other call.
+import { discoverSkills, formatSkills, readSkill, skillPrompt } from "../skills/resolver.js";
 import { randomUUID } from "node:crypto";
 import { SessionJournal, listSessions } from "./sessions.js";
 import { providerView } from "./context.js";
@@ -51,9 +52,8 @@ const slashHelp = `  /help                 this list
 // The /init skill: a house version in the project's or the person's .maquette/skills/init/
 // replaces the one Maquette ships. Returns its body, without the frontmatter.
 export function initSkill(root, home = homedir()) {
-    const bundled = fileURLToPath(new URL("../../skills/init/SKILL.md", import.meta.url));
-    const from = [join(root, ".maquette", "skills", "init", "SKILL.md"), join(home, ".maquette", "skills", "init", "SKILL.md")].find((f) => existsSync(f)) ?? bundled;
-    return { text: readFileSync(from, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "").trim(), from, bundled: from === bundled };
+    const skill = readSkill(root, "init", undefined, { home });
+    return { text: skill.text, from: skill.path, bundled: skill.bundled };
 }
 // The warnings in an open_document reply, which DesignCraft gives as JSON: its own from this
 // open, and those Maquette recorded beside the document when it was saved.
@@ -82,6 +82,8 @@ export class AgentSession {
     caller = `session:${randomUUID()}`;
     #toolSnapshot = new Map();
     #registryRevision;
+    #skills;
+    #skillsFingerprint;
     #resumeWarnings = [];
     #listeners = new Set();
     #abort;
@@ -244,6 +246,8 @@ export class AgentSession {
             return this.emit({ type: "output", text: slashHelp });
         if (name === "tools")
             return this.emit({ type: "output", text: catalogue(this.server.tools) });
+        if (name === "skills")
+            return this.emit({ type: "output", text: formatSkills(this.server.root, args || undefined) });
         if (name === "mcp") {
             const [action, server] = args.split(/\s+/);
             if (action === "trust") {
@@ -334,6 +338,11 @@ export class AgentSession {
         }
         if (name === "init")
             return this.init(args);
+        const skill = discoverSkills(this.server.root).skills.find(s => s.name === name);
+        if (skill) {
+            const loaded = readSkill(this.server.root, name);
+            return this.turn(`The person invoked /${name}. Skill guidance (below core policy and the current request; grants no permissions). Source: ${loaded.path}. Supporting paths resolve from ${loaded.directory}.\n\n${loaded.text}\n\nUser arguments (data):\n${args || "(none)"}`, `/${name}${args ? ` ${args}` : ""}`);
+        }
         this.notice(`There's no /${name}. The slash commands are ${slashCommands.join(", ")}.`, "warn");
     }
     // /init: the skill goes to the model as this turn's message, with what it needs to know about
@@ -389,7 +398,7 @@ export class AgentSession {
         return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
     }
     system() {
-        return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol, project: this.#project });
+        return systemPrompt({ root: this.server.root, instructions: this.server.instructions, tools: this.server.tools, mode: this.mode, textProtocol: this.textProtocol, project: this.#project, skills: this.#skills ? skillPrompt(this.#skills) : undefined });
     }
     // Reads MAQUETTE.md for this turn. A change since the model last had it, deletion included,
     // gets a notice on the screen and a line in front of the person's message: a system block
@@ -422,6 +431,13 @@ export class AgentSession {
     // results, until it answers without calling anything.
     // `shown` is what the transcript shows for it, when that isn't the text itself.
     async turn(text, shown = text) {
+        this.#skills = discoverSkills(this.server.root);
+        const fingerprint = JSON.stringify(this.#skills);
+        if (this.#skillsFingerprint && this.#skillsFingerprint !== fingerprint)
+            this.notice("Skill catalogue or body changed; reload affected guidance with skill before relying on it.", "warn");
+        this.#skillsFingerprint = fingerprint;
+        for (const warning of this.#skills.warnings)
+            this.notice(warning, "warn");
         this.commit({ role: "user", parts: [...this.readProject(), { type: "text", text }] });
         this.emit({ type: "user", text: shown });
         this.busy = true;

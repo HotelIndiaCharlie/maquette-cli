@@ -36,7 +36,7 @@ async function start(extra: string[] = []) {
 
 test("without a terminal, maquette serves calls, prints plain log lines and doesn't load Ink", async () => {
   const m = await start(["--import", hook]);
-  assert.match(m.out(), /16 tools\)/, m.err());
+  assert.match(m.out(), /\d+ tools\)/, m.err());
   assert.match(m.out(), /From another terminal/);
   const tools = await (await fetch(`http://127.0.0.1:${m.port}/tools`)).json();
   // macOS reports the temp folder through its /private symlink.

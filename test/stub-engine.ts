@@ -6,6 +6,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { DesignCraft } from "../src/designcraft.ts";
+import skillTools from "../src/tools/skills/index.ts";
 import workspaceTools from "../src/tools/workspace/index.ts";
 
 // A 1×1 white PNG.
@@ -24,13 +25,15 @@ const tools = [
 
 const workspace = workspaceTools({ dc: {} as DesignCraft, root: process.cwd(), readRoots: [process.cwd()], warnings: () => [] });
 
+const skills = skillTools({ dc: {} as DesignCraft, root: process.cwd(), readRoots: [process.cwd()], warnings: () => [] });
 let open: string | null = null;
 const server = new Server({ name: "stub", version: "0" }, { capabilities: { tools: {} }, instructions: "Stub engine: nothing is really drawn." });
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...tools, ...workspace.tools] }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...tools, ...workspace.tools, ...skills.tools] }));
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name } = req.params;
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
   const text = (t: string) => ({ content: [{ type: "text", text: t }] });
+  if (skills.tools.some(t => t.name === name)) return skills.call(name, args);
   if (workspace.tools.some((t) => t.name === name)) return workspace.call(name, args);
   switch (name) {
     case "open_document":

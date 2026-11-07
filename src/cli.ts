@@ -5,6 +5,7 @@
 // model and tool calls run directly. Calls run one at a time, all on the same open document.
 // `call` and `tools` are its clients. `config` shows and changes the settings, and `ask` and
 // `models` talk to the model they name.
+import { formatSkills } from "./skills/resolver.ts";
 import { ensureRuntime } from "./runtime/connect.ts";
 import { redactedMcp } from "./mcp/config.ts";
 import { serveBridge } from "./mcp/bridge.ts";
@@ -35,6 +36,8 @@ const usage = `Usage (mqt is short for maquette and takes the same commands):
   maquette example                       copy the example report into ./example/
   maquette install-designcraft           install the DesignCraft CLI ${pin.version} (the headless engine, not the app)
   maquette ask "<message>"               ask the model one question; - or a pipe reads it from stdin
+  maquette skills [name]                 list skills and sources, or show one body (no running model needed)
+  maquette mcp                           MCP stdio facade attached to the shared runtime
   maquette models                        list the models the provider offers
   maquette config                        show the settings and where each comes from
   maquette config set <key> <value>      change one (unset <key> removes it; keys describes them all)
@@ -446,6 +449,7 @@ for (const warning of loaded.warnings) console.error(paint(33, warning));
 if (wantsVersion) console.log(`maquette ${version} (DesignCraft CLI ${pin.version} pinned)`);
 else if (wantsHelp || command === "help") console.log(usage);
 else if (!command || command === "serve") await serve();
+else if (command === "skills") console.log(formatSkills(process.cwd(), rest[0]));
 else if (command === "mcp") {
   const { server } = await ensureRuntime({ port, version }, async () => {
     const engine = process.env.MAQUETTE_ENGINE || undefined;

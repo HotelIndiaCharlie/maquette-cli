@@ -16,6 +16,7 @@ export const slashAbout: Record<string, string> = {
   "/model": "pick a model, or /model <id>",
   "/provider": "pick a provider: anthropic or openai-compatible",
   "/permissions": "pick a permission mode: ask, auto or plan",
+  "/skills": "list available skills and sources, or /skills <name>",
   "/mcp": "MCP server status; reconnect <name> or trust project configuration",
   "/sessions": "list saved conversations in this folder",
   "/clear": "start a new conversation",

@@ -255,10 +255,10 @@ test("/init sends the skill to the model as one turn, shown as /init; a rerun, n
   assert.equal((names(events, "user").at(-1) as { text: string }).text, "/init the cover changed");
 
   mkdirSync(join(server.root, ".maquette", "skills", "init"), { recursive: true });
-  writeFileSync(join(server.root, ".maquette", "skills", "init", "SKILL.md"), "---\nname: init\n---\nOur house survey.\n");
+  writeFileSync(join(server.root, ".maquette", "skills", "init", "SKILL.md"), "---\nname: init\ndescription: Custom init guidance\n---\nOur house survey.\n");
   await s.submit("/init");
   assert.match((provider.requests[2].messages.at(-1)!.parts.at(-1) as { text: string }).text, /Follow these instructions\.\n\nOur house survey\.\n\n/);
-  assert.match((names(events, "notice").at(-1) as { text: string }).text, /\/init follows .*\.maquette\/skills\/init\/SKILL\.md, in place of Maquette's own/);
+  assert.match((names(events, "notice").find(e => /\/init follows/.test((e as { text: string }).text)) as { text: string }).text, /\/init follows .*\.maquette\/skills\/init\/SKILL\.md, in place of Maquette's own/);
 
   const blind = session([{ text: "ok" }]);
   Object.defineProperty(blind.provider, "vision", { value: false });
