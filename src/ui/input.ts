@@ -98,10 +98,11 @@ export function InputBox(props: InputProps) {
       if (props.picker) {
         const { options, index, move, pick } = props.picker;
         if ((key.ctrl && input === "c") || key.escape) return pick(null);
-        if (key.upArrow) return move((index + options.length - 1) % options.length);
-        if (key.downArrow || key.tab) return move((index + 1) % options.length);
-        if (key.return) return pick(options[index]?.id ?? null);
-        if (/^[1-9]$/.test(input) && Number(input) <= options.length) return pick(options[Number(input) - 1].id);
+        const next = (step: number) => { for (let n = 1; n <= options.length; n++) { const i = (index + step * n + options.length * n) % options.length; if (!options[i].disabled) return move(i); } };
+        if (key.upArrow) return next(-1);
+        if (key.downArrow || key.tab) return next(1);
+        if (key.return) return options[index]?.disabled ? undefined : pick(options[index]?.id ?? null);
+        if (/^[1-9]$/.test(input) && Number(input) <= options.length && !options[Number(input) - 1].disabled) return pick(options[Number(input) - 1].id);
         return;
       }
       if (props.permission) {

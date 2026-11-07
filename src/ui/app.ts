@@ -1,5 +1,7 @@
 // The screen: finished items above, the live turn, then the input box and footer. It
 // subscribes to the session's and the server's events and draws them; the logic is theirs.
+import type { Activity } from "../agent/presentation.ts";
+import { collapseTools } from "../agent/presentation.ts";
 import type { AgentEvent, Choice, PermissionAnswer, Status } from "../agent/events.ts";
 import type { AgentSession } from "../agent/session.ts";
 import { tilde } from "../args.ts";
@@ -7,8 +9,8 @@ import { bannerText } from "../banner.ts";
 import type { ServerEvent, ServerHandle } from "../server.ts";
 import { Box, h, Text, useApp, useEffect, useRef, useState, useStdout } from "./h.ts";
 import { InputBox } from "./input.ts";
-import { Footer, Notices, PermissionPrompt, Picker, type Segment, shortcuts, Turn } from "./parts.ts";
-import { type Item, type ItemBody, type ToolItem, Transcript } from "./transcript.ts";
+import { Footer, Notices, PermissionPrompt, Picker, Progress, type Segment, shortcuts, Turn } from "./parts.ts";
+import { type Item, type ItemBody, type ToolItem, ToolLine, Transcript } from "./transcript.ts";
 
 // `trace` is the tracing line, when --trace or MAQUETTE_TRACE asked for it: on, or why it's off.
 export type Info = { version: string; engineName: string; toolCount: number; port: number; images: string; hint?: string; trace?: { ok: boolean; text: string } };
@@ -50,6 +52,12 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
   const [items, setItems] = useState<Item[]>(() => [{ key: 0, kind: "banner", lines: [...bannerText(columns).split("\n"), ...startLines(info, server.root, session.status)] }]);
   const [segments, setSegments] = useState<Segment[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const readyRef = useRef(false);
+  const columnsRef = useRef(columns); columnsRef.current = columns;
+  const [activity, setActivity] = useState<Activity | null>(null);
+  const live = useRef<Segment[] | null>(null);
+  const [detail, setDetail] = useState<ToolItem | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [pick, setPick] = useState<Choosing | null>(null);
   const [status, setStatus] = useState<Status>(session.status);
@@ -59,69 +67,44 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
   const add = (...more: ItemBody[]) => setItems((all) => [...all, ...more.map((m): Item => ({ ...m, key: keys.current++ }))]);
 
   useEffect(() => {
+    const update = (f: (s: Segment[]) => Segment[]) => { live.current = f(live.current ?? []); setSegments(live.current); };
+    const flush = () => {
+      if (live.current?.length) add(...collapseTools(live.current.map((s): ItemBody => s.kind === "text" ? { kind: "answer", text: s.text } : s.kind === "notice" ? s : s.done ? s : { ...s, done: true, ok: false, text: "Interrupted before completion." })));
+      live.current = null; setSegments(null);
+    };
     const offSession = session.on((e: AgentEvent) => {
       switch (e.type) {
-        case "user":
-          add({ kind: "user", text: e.text });
-          setSegments([]);
-          setBusy(true);
+        case "input":
+          flush(); add({ kind: "user", text: e.text }); live.current = []; setSegments([]); setDetail(null); break;
+        case "user": break; // model/telemetry event; the input was already echoed once
+        case "activity":
+          setActivity(e.activity); setBusy(e.activity !== null);
+          if (!e.activity) { flush(); setAsk(null); }
           break;
+        case "session":
+          if (readyRef.current && (stdout as NodeJS.WriteStream).isTTY) stdout.write("\x1b[2J\x1b[H");
+          readyRef.current = true;
+          setReady(true); setGeneration(g => g + 1);
+          setItems([{ key: keys.current++, kind: "banner", lines: [...bannerText(columnsRef.current).split("\n"), ...startLines(info, server.root, session.status), `  Conversation: ${e.view.title}${e.view.id ? ` (${e.view.id})` : ""}`, ...e.view.warnings.map(w => `  ! ${w}`), ...(e.view.restored ? [`  Restored ${e.view.restored} most recent turns${e.view.legacy ? "; older transcript reconstructed from saved records" : ""}.`] : [])] }, ...collapseTools(e.view.items).map(m => ({ ...m, key: keys.current++ }))]);
+          live.current = null; setSegments(null); setDetail(null); break;
         case "text":
-          setSegments((s) => {
-            const all = s ? [...s] : [];
-            const last = all.at(-1);
-            if (last?.kind === "text") all[all.length - 1] = { kind: "text", text: last.text + e.text };
-            else all.push({ kind: "text", text: e.text });
-            return all;
-          });
-          break;
-        case "tool_call":
-          setSegments((s) => [...(s ?? []), { kind: "tool", id: e.id, name: e.name, input: e.input, source: e.source, done: false }]);
-          break;
-        case "tool_result":
-          setSegments((s) => (s ?? []).map((seg) => (seg.kind === "tool" && seg.id === e.id ? { ...seg, done: true, ok: e.ok, text: e.text, images: e.images, ms: e.ms } : seg)));
-          break;
-        case "ask_permission":
-          setAsk({ id: e.id, name: e.name, input: e.input, reply: (a) => {
-            setAsk(null);
-            e.reply(a);
-          } });
-          break;
+          update(s => { const all = [...s]; const last = all.at(-1); if (last?.kind === "text") all[all.length - 1] = { kind: "text", text: last.text + e.text }; else all.push({ kind: "text", text: e.text }); return all; }); break;
+        case "tool_call": update(s => [...s, { kind: "tool", id: e.id, name: e.name, input: e.input, source: e.source, done: false }]); break;
+        case "tool_result": update(s => s.map(seg => seg.kind === "tool" && seg.id === e.id ? { ...seg, done: true, ok: e.ok, text: e.text, images: e.images, ms: e.ms } : seg)); break;
+        case "ask_permission": setAsk({ id: e.id, name: e.name, input: e.input, reply: a => { setAsk(null); e.reply(a); } }); break;
         case "choose": {
-          const index = Math.max(0, e.options.findIndex((o) => o.id === e.current));
-          setPick({ title: e.title, options: e.options, index, reply: (id) => {
-            setPick(null);
-            e.reply(id);
-          } });
-          break;
+          const index = Math.max(0, e.options.findIndex(o => o.id === e.current && !o.disabled));
+          setPick({ title: e.title, options: e.options, index, reply: id => { setPick(null); e.reply(id); } }); break;
         }
-        case "shell":
-          add({ kind: "shell", command: e.command, output: e.output, code: e.code });
-          break;
-        case "output":
-          add({ kind: "output", text: e.text, ok: e.ok ?? true, images: e.images });
-          break;
+        case "shell": add({ kind: "shell", command: e.command, output: e.output, code: e.code }); break;
+        case "output": add({ kind: "output", text: e.text, ok: e.ok ?? true, images: e.images }); break;
         case "notice":
-          if (e.level === "info") add({ kind: "notice", text: e.text, level: e.level });
-          else setNotices((n) => [...n.slice(-2), { text: e.text, level: e.level }]);
+          if (live.current !== null) update(s => [...s, { kind: "notice", text: e.text, level: e.level }]);
+          else add({ kind: "notice", text: e.text, level: e.level });
           break;
-        case "done":
-          setSegments((s) => {
-            const finished = (s ?? []).map((seg): ItemBody => (seg.kind === "text" ? { kind: "answer", text: seg.text } : seg.done ? seg : { ...seg, done: true, ok: false, text: "interrupted" }));
-            if (e.interrupted) finished.push({ kind: "notice", text: "Interrupted.", level: "info" });
-            add(...finished);
-            return null;
-          });
-          setBusy(false);
-          setAsk(null);
-          break;
-        case "status":
-          setStatus(e.status);
-          break;
-        case "exit":
-          onExit();
-          exit();
-          break;
+        case "done": if (e.interrupted) update(s => [...s, { kind: "notice", text: "Interrupted.", level: "info" }]); setAsk(null); break;
+        case "status": setStatus(e.status); break;
+        case "exit": onExit(); exit(); break;
       }
     });
     const offServer = server.on((e: ServerEvent) => {
@@ -129,6 +112,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
       else if (e.type === "catalogue") session.sendStatus();
       else if (e.type === "engine_log") add({ kind: "notice", text: e.text.trimEnd(), level: "info" });
     });
+    void session.initializeInteractive();
     session.sendStatus();
     return () => {
       offSession();
@@ -136,22 +120,19 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
     };
   }, []);
 
-  const toggleExpand = () =>
-    setItems((all) => {
-      const i = all.findLastIndex((it) => it.kind === "tool");
-      if (i < 0) return all;
-      const copy = [...all];
-      // Static never redraws an item, so the expanded copy is added as a new one.
-      const it = copy[i] as ToolItem & { key: number };
-      copy.push({ ...it, key: keys.current++, expanded: !it.expanded });
-      return copy;
-    });
+  const toggleExpand = () => {
+    const item = collapseTools(live.current ?? []).findLast(s => s.kind === "tool") as ToolItem | undefined ?? items.findLast(s => s.kind === "tool") as ToolItem | undefined;
+    if (item) setDetail(current => current?.id === item.id ? null : item);
+  };
+  const selected = detail ? [...collapseTools(segments ?? []), ...items].findLast(s => s.kind === "tool" && (s.id === detail.id || s.calls?.some(c => c.id === detail.id))) as ToolItem | undefined ?? detail : null;
 
   return h(
     Box,
     { flexDirection: "column" },
-    h(Transcript, { items, root: server.root, generation }),
-    segments ? h(Turn, { segments, root: server.root, waiting: busy && !ask }) : null,
+    ready ? h(Transcript, { items, root: server.root, generation }) : h(Box, { flexDirection: "column" }, h(Text, {}, bannerText(columns))),
+    segments ? h(Turn, { segments, root: server.root, waiting: false }) : null,
+    activity && !ask && !pick ? h(Progress, { activity }) : null,
+    selected ? h(Box, { flexDirection: "column", marginTop: 1 }, h(Text, { bold: true }, `Tool output: ${selected.name} (Ctrl-O or Esc to close)`), h(ToolLine, { item: { ...selected, expanded: true }, root: server.root, frame: 0 }), h(Text, { dimColor: true }, session.journal ? `Full call records: ${session.journal.path}` : "Full results remain in the current conversation.")) : null,
     ask ? h(PermissionPrompt, { name: ask.name, input: ask.input }) : null,
     pick ? h(Picker, { title: pick.title, options: pick.options, index: pick.index }) : null,
     h(Notices, { notices }),
@@ -168,6 +149,7 @@ export function App({ session, server, info, onExit }: { session: AgentSession; 
       onToggleExpand: toggleExpand,
       onHelp: () => setHelpShown((s) => !s),
       onEscape: () => {
+        if (detail) { setDetail(null); return; }
         if (busy) session.interrupt();
         setNotices([]);
         setHelpShown(false);

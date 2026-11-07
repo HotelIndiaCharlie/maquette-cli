@@ -232,6 +232,7 @@ export class Tracing {
         }
         break;
       case "tool_result": {
+        if (e.source && e.source !== "model") break;
         if (!this.turn) break;
         const t = e.timing ?? { permission: 0, queue: 0, run: e.ms };
         const started = now - t.permission - t.queue - t.run;

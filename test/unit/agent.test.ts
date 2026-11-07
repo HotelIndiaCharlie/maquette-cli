@@ -36,7 +36,7 @@ test("a sentence runs the model's calls through the queue, sends back the result
   assert.deepEqual(names(events, "tool_call").map((e) => (e as { name: string }).name), ["open_document", "render_page"]);
   assert.deepEqual(names(events, "ask_permission").map((e) => (e as { name: string }).name), ["open_document"], "opening asks; the render doesn't");
   assert.equal(events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text).join(""), "Opening it. Page one is rendered.");
-  const done = events.at(-2);
+  const done = events.findLast(e => e.type === "done");
   assert.equal(done?.type, "done");
   // The second request carries the results, the render as an image.
   assert.equal(provider.requests.length, 2);
@@ -116,7 +116,7 @@ test("a tool line typed by the person runs at once, in any mode, and the model i
   const { s, server, events } = session([], { mode: "plan" });
   await s.submit("chart_create slot:01 {}");
   assert.deepEqual(server.calls.map((c) => [c.tool, c.source]), [["chart_create", "prompt"]]);
-  const out = names(events, "output")[0] as { text: string; images: string[] };
+  const out = names(events, "tool_result")[0] as { text: string; images: string[] };
   assert.match(out.text, /Chart drawn/);
   assert.equal(out.images.length, 1);
   assert.match((s.history[0].parts[0] as { text: string }).text, /The person ran `chart_create slot:01 \{\}`/);

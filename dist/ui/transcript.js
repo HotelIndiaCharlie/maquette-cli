@@ -12,11 +12,14 @@ export function summarise(input) {
         .join(" ");
 }
 export function ToolLine({ item, root, frame }) {
+    const argumentsText = item.expanded ? JSON.stringify(item.input, null, 2) : "";
     const mark = !item.done ? h(Text, { color: "yellow" }, spinnerFrames[frame % spinnerFrames.length]) : item.ok ? h(Text, { color: "green" }, "✓") : h(Text, { color: "red" }, "✗");
     const bits = [mark, " "];
     if (item.source === "http" || item.source === "mcp")
         bits.push(h(Text, { color: "magenta" }, `${item.source} `));
     bits.push(h(Text, { bold: true }, item.name));
+    if (item.calls?.length)
+        bits.push(h(Text, { dimColor: true }, ` ×${item.calls.length}, same result`));
     const args = summarise(item.input);
     if (args)
         bits.push(h(Text, { dimColor: true }, ` ${gist(args, item.done && item.images?.length ? 50 : 70)}`));
@@ -25,10 +28,12 @@ export function ToolLine({ item, root, frame }) {
             bits.push(h(Text, { dimColor: true }, ` · ${item.ms >= 1000 ? `${(item.ms / 1000).toFixed(1)} s` : `${item.ms} ms`}`));
         for (const p of item.images ?? [])
             bits.push(h(Text, { color: "cyan" }, ` · ${relative(root, p)}`));
+        if (item.source === "prompt" && item.ok && item.text)
+            bits.push(h(Text, { dimColor: true }, ` \u00b7 ${gist(item.text.replace(/\s+/g, " "), 120)}`));
         if (!item.ok && item.text)
             bits.push(h(Text, { color: "red" }, ` · ${gist(item.text.split("\n")[0], 80)}`));
     }
-    const detail = item.expanded ? h(Box, { flexDirection: "column", paddingLeft: 4 }, h(Text, { dimColor: true }, JSON.stringify(item.input, null, 2)), item.text ? h(Text, { color: item.ok ? undefined : "red" }, gist(item.text, 4000)) : null) : null;
+    const detail = item.expanded ? h(Box, { flexDirection: "column", paddingLeft: 4 }, h(Text, { dimColor: true }, gist(argumentsText, 2000)), argumentsText.length > 2000 ? h(Text, { color: "yellow" }, "Arguments truncated; full arguments are in the call records.") : null, item.calls ? h(Text, { dimColor: true }, item.calls.slice(-20).map(c => `${c.id} (${c.ms ?? 0} ms)`).join("\n"), item.calls.length > 20 ? "\nEarlier call IDs omitted; see full call records." : "") : null, item.text ? h(Text, { color: item.ok ? undefined : "red" }, gist(item.text, 4000)) : null, (item.text?.length ?? 0) > 4000 ? h(Text, { color: "yellow" }, "Result truncated; full result is in the call records.") : null) : null;
     return h(Box, { flexDirection: "column" }, h(Text, {}, ...bits), detail);
 }
 export function renderItem(item, root) {

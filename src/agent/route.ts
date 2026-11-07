@@ -19,6 +19,7 @@ export const slashAbout: Record<string, string> = {
   "/compact": "summarize older complete groups, keeping recent context intact",
   "/skills": "list available skills and sources, or /skills <name>",
   "/mcp": "MCP server status; reconnect <name> or trust project configuration",
+  "/resume": "choose a saved conversation, or /resume <id>",
   "/sessions": "list saved conversations in this folder",
   "/clear": "start a new conversation",
   "/cost": "tokens and dollars this session",

@@ -207,7 +207,7 @@ async function serve() {
 
   const { AgentSession } = await import("./agent/session.ts");
   const { runApp } = await import("./ui/app.ts");
-  try { session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume }); }
+  try { session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume, deferPersistence: true }); }
   catch (e) { await server.stop(); fail((e as Error).message); }
   const traced = await trace(server, session, (text, level) => session.notice(text, level));
   tracing = traced.tracing;

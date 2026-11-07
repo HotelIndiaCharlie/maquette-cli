@@ -216,7 +216,7 @@ async function serve() {
     const { AgentSession } = await import("./agent/session.js");
     const { runApp } = await import("./ui/app.js");
     try {
-        session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume });
+        session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume, deferPersistence: true });
     }
     catch (e) {
         await server.stop();
