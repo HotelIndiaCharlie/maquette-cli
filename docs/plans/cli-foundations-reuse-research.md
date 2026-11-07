@@ -1,6 +1,6 @@
 # Reuse assessment before CLI implementation
 
-Date: 7 November 2026. Planning only; no package installation, implementation or connection test performed.
+Date: 7 November 2026. Initial planning assessment refreshed during the authorized implementation; installed versions, reuse decisions and actual verification are recorded below and in [delivery evidence](cli-foundations-delivery-report.md).
 
 ## Required decision before coding
 
@@ -19,7 +19,7 @@ Prefer existing components. A custom component requires a concrete uncovered req
 | Agent Skills standard | [Official integration guide](https://agentskills.io/client-implementation/adding-skills-support) describes discovery, metadata catalogues, on-demand bodies and support files. | Follow the existing SKILL.md ecosystem for HOT-55. Use a maintained YAML parser. Recheck strict name/validation choices in the earlier spec against interoperability; do not invent a new skill format. |
 | Node filesystem primitives | The workspace already has confined read_file, glob, grep and survey tools. | HOT-63 reuses these and one bounded folder traversal helper. No new agent framework is justified solely by a folder map. |
 
-These fit assessments are engineering judgments from the checked documentation and local architecture; no candidate was benchmarked or integrated.
+The initial fit assessments are engineering judgments from documentation and local architecture. The implementation refresh below records the components actually selected and integrated; no comparative benchmark is claimed.
 
 ## What is actually Maquette-specific
 
@@ -47,16 +47,16 @@ The journal preserves conversation; saving the layout remains an explicit docume
 
 ## Active scope
 
-HOT-54 → HOT-55 → HOT-63 → HOT-56. HOT-56's first resume slice can be delivered independently of HOT-54; only later shared-change integration requires its runtime contract.
+Execution: HOT-56 save/list/resume → HOT-54 → HOT-55 → HOT-63 → HOT-56 compaction/change notices. The first resume slice is independent of new MCP connections.
 
-HOT-57 (headless JSON automation/hooks) is deferred and excluded from this implementation plan. Its specification remains on its Linear issue for later reuse. HOT-61 and HOT-65 remain outside scope. No implementation is authorized by these planning updates.
+HOT-57 (headless JSON automation/hooks) is deferred and excluded from this implementation plan. Its specification remains on its Linear issue for later reuse. HOT-61 and HOT-65 remain outside scope. The subsequent explicit owner handover authorized implementation of the four active issues, without release/deploy/automatic merge.
 
 
 ## Implementation refresh — 7 November 2026
 
 Official MCP v1 client guide and installed declarations agree: Client.connect/listTools/callTool, StdioClientTransport, StreamableHTTPClientTransport and SSEClientTransport cover connection machinery. Installed SDK is 1.32.2 (MIT), Node is 24.22.1. No protocol implementation or interactive OAuth flow is needed.
 
-Rechecked AI SDK MCP tools, LangGraph persistence and Agent Skills specification/client implementation, plus yaml official documentation. Retain the current provider-native message loop: moving it to AI SDK/LangGraph would require translating signed provider history and replacing permissions/UI integration. Node filesystem JSONL covers the required single-writer append journal; Maquette owns only commit ordering, recovery and request views. The shared registry/root ownership remain application-specific. Agent Skills supplies format and progressive loading; yaml 2 will parse frontmatter.
+Rechecked AI SDK MCP tools, LangGraph persistence and Agent Skills specification/client implementation, plus yaml official documentation. Retain the current provider-native message loop: moving it to AI SDK/LangGraph would require translating signed provider history and replacing permissions/UI integration. Node filesystem JSONL covers the required single-writer append journal; Maquette owns only commit ordering, recovery and request views. The shared registry/root ownership remain application-specific. Agent Skills supplies format and progressive loading; yaml 2.9.1 parses frontmatter.
 
 The real acceptance target is the installed pinned DesignCraft engine shared over the Maquette facade with an SDK MCP client. stdio/HTTP/SSE fixtures establish transport behavior only; no Figma/application-specific compatibility or interactive OAuth is claimed.
 

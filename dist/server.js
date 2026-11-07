@@ -1,4 +1,6 @@
 // Runtime-owned tool registry and one FIFO shared by terminal, HTTP and the MCP facade.
+import { classify } from "./agent/permissions.js";
+import { ChangeRing } from "./runtime/changes.js";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join } from "node:path";
@@ -30,20 +32,26 @@ export async function startServer(options) {
     let stopping = false;
     try {
         await client.connect(transport, { timeout: 10_000 });
-        const identity = { protocol: runtimeProtocol, version: options.version, root, runtimeId: randomUUID() };
+        const identity = { protocol: runtimeProtocol, version: options.version, root, runtimeId: randomUUID(), ownerPid: process.pid };
+        const changes = new ChangeRing(identity.runtimeId);
         registry = new ToolRegistry(root, options.version, client, () => emit({ type: "catalogue", revision: registry?.revision ?? 0 }), options.home);
         await registry.start();
         const live = registry;
         const instructions = client.getInstructions() ?? "";
-        const images = join(root, "maquette-renders", stamp(new Date()));
+        const images = join(root, "maquette-renders", `${stamp(new Date())}-${identity.runtimeId.slice(0, 8)}`);
         let count = 0;
         let queue = Promise.resolve();
         let lastImage;
         async function run(id, tool, args, source, options) {
             const t0 = Date.now();
             const reply = { id, tool, ok: false, text: "", images: [], source, ms: 0, caller: options.caller ?? source };
+            const definition = live.byName.get(tool);
             try {
-                const r = await live.call(tool, args, options.identity);
+                const before = changes.since(options.cursor);
+                const stale = options.cursor && (before.gap || before.changes.some(e => e.caller !== options.caller));
+                const r = definition && classify(definition) !== "read" && stale
+                    ? { content: [{ type: "text", text: "Another caller changed shared state after this model step began. Inspect current state before editing; this call was not run." }], isError: true }
+                    : await live.call(tool, args, options.identity);
                 reply.result = r;
                 const texts = [];
                 for (const c of r.content) {
@@ -61,11 +69,17 @@ export async function startServer(options) {
                     else
                         texts.push(JSON.stringify(c));
                 }
+                if (r.structuredContent !== undefined)
+                    texts.push(JSON.stringify({ structuredContent: r.structuredContent }));
                 reply.ok = !r.isError;
                 reply.text = texts.join("\n");
             }
             catch (e) {
                 reply.text = e instanceof Error ? e.message : String(e);
+            }
+            if (reply.ok && definition && classify(definition) === "change") {
+                const scope = definition._maquette && !definition._maquette.builtin ? "external" : /^(bash|write_file|edit_file|open_file|memory_write|memory_add)$/.test(tool) ? "workspace" : "designcraft";
+                changes.append({ caller: reply.caller, tool, source, scope, server: definition._maquette?.server });
             }
             reply.ms = Date.now() - t0;
             emit({ type: "call", reply, args, at: new Date() });
@@ -90,7 +104,16 @@ export async function startServer(options) {
                 if (req.method === "GET" && url.pathname === "/identity")
                     return send(200, identity);
                 if (req.method === "GET" && url.pathname === "/tools")
-                    return send(200, { ...identity, revision: live.revision, root, instructions, project: projectInstructions(root) ?? null, tools: live.tools });
+                    return send(200, { ...identity, revision: live.revision, changeSequence: changes.sequence, root, instructions, project: projectInstructions(root) ?? null, tools: live.tools });
+                if (req.method === "GET" && url.pathname === "/changes") {
+                    if (claimedRoot !== root)
+                        return send(409, { ok: false, text: "Changes require the canonical project root." });
+                    const runtime = url.searchParams.get("runtime");
+                    const after = Number(url.searchParams.get("after") ?? 0);
+                    if (!Number.isSafeInteger(after) || after < 0)
+                        return send(400, { ok: false, text: "after must be a non-negative integer cursor." });
+                    return send(200, changes.since(runtime ? { runtime, after } : undefined));
+                }
                 if (req.method === "GET" && url.pathname === "/mcp")
                     return send(200, { servers: [...live.statuses.values()] });
                 if (req.method !== "POST" || !["/call", "/mcp/reconnect"].includes(url.pathname))
@@ -117,7 +140,7 @@ export async function startServer(options) {
                     return send(400, { ok: false, text: `No tool named ${JSON.stringify(tool)}; GET /tools lists them.` });
                 if (typeof args !== "object" || args === null || Array.isArray(args))
                     return send(400, { ok: false, text: "arguments must be a JSON object." });
-                return send(200, await enqueue(tool, args, body.source === "mcp" ? "mcp" : "http", { caller: typeof body.caller === "string" ? body.caller.slice(0, 128) : "http", identity: typeof body.identity === "string" ? body.identity : undefined }));
+                return send(200, await enqueue(tool, args, body.source === "mcp" ? "mcp" : "http", { caller: typeof body.caller === "string" ? body.caller.slice(0, 128) : "http", identity: typeof body.identity === "string" ? body.identity : undefined, cursor: body.cursor && typeof body.cursor.runtime === "string" && Number.isSafeInteger(body.cursor.after) && body.cursor.after >= 0 ? body.cursor : undefined }));
             }
             catch {
                 if (!res.headersSent)
@@ -131,7 +154,7 @@ export async function startServer(options) {
             server.listen(options.port, "127.0.0.1", done);
         });
         actualPort = server.address().port;
-        return { root, port: actualPort, identity, get revision() { return live.revision; }, get tools() { return live.tools; }, get byName() { return live.byName; }, instructions, images,
+        return { root, port: actualPort, identity, get changeSequence() { return changes.sequence; }, changes: async (cursor) => changes.since(cursor), get revision() { return live.revision; }, get tools() { return live.tools; }, get byName() { return live.byName; }, instructions, images,
             lastImage: () => lastImage, enqueue, mcpStatus: async () => [...live.statuses.values()], reconnect: name => live.reconnect(name), refresh: async () => { },
             on(listener) { listeners.add(listener); return () => void listeners.delete(listener); },
             async stop() { if (stopping)

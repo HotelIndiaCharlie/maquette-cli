@@ -116,8 +116,10 @@ export function App({ session, server, info, onExit }) {
             }
         });
         const offServer = server.on((e) => {
-            if (e.type === "call" && e.reply.source === "http")
-                add({ kind: "tool", id: `http${e.reply.id}`, name: e.reply.tool, input: e.args, source: "http", done: true, ok: e.reply.ok, text: e.reply.text, images: e.reply.images, ms: e.reply.ms });
+            if (e.type === "call" && (e.reply.source === "http" || e.reply.source === "mcp"))
+                add({ kind: "tool", id: `http${e.reply.id}`, name: e.reply.tool, input: e.args, source: e.reply.source, done: true, ok: e.reply.ok, text: e.reply.text, images: e.reply.images, ms: e.reply.ms });
+            else if (e.type === "catalogue")
+                session.sendStatus();
             else if (e.type === "engine_log")
                 add({ kind: "notice", text: e.text.trimEnd(), level: "info" });
         });

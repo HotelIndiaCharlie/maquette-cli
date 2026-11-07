@@ -1,10 +1,18 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, fchmodSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, relative, sep } from "node:path";
 import { acquireLock } from "../runtime/lock.js";
 import { pairedView } from "./context.js";
 const idPattern = /^[a-zA-Z0-9_-]{1,120}$/;
 const kinds = new Set(["header", "provider", "message", "call_start", "call_result", "shell_start", "shell_result", "interrupted", "usage", "compact", "cursor", "notice", "recovered"]);
+function validMessage(m) {
+    if (!m || !["assistant", "user"].includes(m.role) || !Array.isArray(m.parts))
+        return false;
+    if (m.native && (m.role !== "assistant" || typeof m.native.provider !== "string" || !("content" in m.native)))
+        return false;
+    const content = (p) => p && (p.type === "text" ? typeof p.text === "string" : p.type === "image" && typeof p.data === "string" && typeof p.mediaType === "string");
+    return m.parts.every((p) => content(p) || (p?.type === "tool_call" && m.role === "assistant" && typeof p.id === "string" && typeof p.name === "string" && p.input && typeof p.input === "object" && !Array.isArray(p.input)) || (p?.type === "tool_result" && m.role === "user" && typeof p.id === "string" && typeof p.name === "string" && Array.isArray(p.content) && p.content.every(content)));
+}
 function directory(root) {
     const canonical = realpathSync(root);
     for (const part of [".maquette", ".maquette/sessions"]) {
@@ -15,6 +23,7 @@ function directory(root) {
         if (r === ".." || r.startsWith(`..${sep}`))
             throw new Error(`Session directory escapes project: ${part}`);
     }
+    chmodSync(join(canonical, ".maquette", "sessions"), 0o700);
     return join(canonical, ".maquette", "sessions");
 }
 function read(path, root) {
@@ -24,7 +33,7 @@ function read(path, root) {
     const last = bytes.lastIndexOf(10);
     const truncated = bytes.length > 0 && last !== bytes.length - 1;
     const valid = bytes.subarray(0, last + 1).toString("utf8");
-    const records = valid.split("\n").filter(Boolean).map((line, i) => {
+    const records = (valid ? valid.slice(0, -1).split("\n") : []).map((line, i) => {
         let r;
         try {
             r = JSON.parse(line);
@@ -36,9 +45,9 @@ function read(path, root) {
             throw new Error(`Unsupported session version at ${path}:${i + 1}; use a compatible Maquette version.`);
         if (r.seq !== i + 1 || !kinds.has(r.type) || typeof r.at !== "string" || !r.data || typeof r.data !== "object")
             throw new Error(`Invalid session record at ${path}:${i + 1}.`);
-        if (r.type === "message" && (!["assistant", "user"].includes(r.data.role) || !Array.isArray(r.data.parts)))
+        if (r.type === "message" && !validMessage(r.data))
             throw new Error(`Invalid message at ${path}:${i + 1}.`);
-        if (r.type === "compact" && !Array.isArray(r.data.messages))
+        if (r.type === "compact" && (!Array.isArray(r.data.messages) || !r.data.messages.every(validMessage)))
             throw new Error(`Invalid compact view at ${path}:${i + 1}.`);
         return r;
     });
@@ -77,6 +86,7 @@ export class SessionJournal {
                 }
             }
             this.#fd = openSync(this.path, options.resume ? "a" : "wx", 0o600);
+            fchmodSync(this.#fd, 0o600);
             if (!options.resume)
                 this.append("header", { root: realpathSync(root), id: this.id, appVersion: options.version ?? "0.1.0", provider: options.provider, model: options.model });
             if (this.warnings.length)
@@ -93,24 +103,69 @@ export class SessionJournal {
             throw new Error("Session journal is closed.");
         const r = { v: 1, seq: this.records.length + 1, at: new Date().toISOString(), type, data };
         const bytes = Buffer.from(`${JSON.stringify(r)}\n`);
-        let offset = 0;
-        while (offset < bytes.length)
-            offset += writeSync(this.#fd, bytes, offset);
-        fsyncSync(this.#fd);
-        this.records.push(r);
+        try {
+            let offset = 0;
+            while (offset < bytes.length)
+                offset += writeSync(this.#fd, bytes, offset);
+            fsyncSync(this.#fd);
+            this.records.push(r);
+        }
+        catch {
+            this.close();
+            throw new Error(`Session journal write failed at ${this.path}; writer closed. Restart with --resume to recover before continuing.`);
+        }
     }
     restore() {
         let messages = [];
-        const pending = new Set();
+        const pending = new Map();
+        let activeCalls = [];
+        let outcomes = new Map();
+        let lastMessage = 0;
+        const complete = () => {
+            if (!activeCalls.length || !outcomes.size)
+                return;
+            messages.push({ role: "user", parts: activeCalls.filter(c => outcomes.has(c.id)).map(c => outcomes.get(c.id)) });
+            activeCalls = [];
+            outcomes.clear();
+        };
         for (const r of this.records) {
-            if (r.type === "message")
+            if (r.type === "message") {
+                lastMessage = r.seq;
+                // The committed group supersedes the per-call recovery view.
+                if (r.data.role === "user" && r.data.parts.some((p) => p.type === "tool_result")) {
+                    activeCalls = [];
+                    outcomes.clear();
+                }
+                else
+                    complete();
                 messages.push(r.data);
-            if (r.type === "compact")
+                if (r.data.role === "assistant")
+                    activeCalls = r.data.parts.filter((p) => p.type === "tool_call");
+            }
+            if (r.type === "compact") {
                 messages = r.data.messages;
+                activeCalls = [];
+                outcomes.clear();
+            }
             if (r.type === "call_start" || r.type === "shell_start")
-                pending.add(r.data.id);
-            if (r.type === "call_result" || r.type === "shell_result")
+                pending.set(r.data.id, r);
+            if (r.type === "call_result" || r.type === "shell_result") {
                 pending.delete(r.data.id);
+                if (activeCalls.some(c => c.id === r.data.id)) {
+                    const normalized = r.data.normalized ?? (r.data.reply ? { type: "tool_result", id: r.data.id, name: r.data.reply.tool, isError: !r.data.reply.ok,
+                        content: [{ type: "text", text: `${r.data.reply.text}\n${(r.data.reply.images ?? []).map((p) => `image: ${p}`).join("\n")}` }] } : undefined);
+                    if (normalized)
+                        outcomes.set(r.data.id, normalized);
+                }
+            }
+        }
+        complete();
+        // Direct effects after the last committed message are evidence, not instructions to replay.
+        for (const r of this.records.filter(r => r.seq > lastMessage)) {
+            if (r.type === "call_result" && r.data.reply?.source === "prompt")
+                messages.push({ role: "user", parts: [{ type: "text", text: `Recovered direct call result (already executed; do not replay): ${r.data.reply.tool}: ${r.data.reply.text}` }] });
+            if (r.type === "shell_result")
+                messages.push({ role: "user", parts: [{ type: "text", text: `Recovered shell result (do not replay), exit ${r.data.code}: ${r.data.output}` }] });
         }
         const paired = pairedView(messages);
         return { messages: paired.messages, uncertain: paired.uncertain || pending.size > 0 };

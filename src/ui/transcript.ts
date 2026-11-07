@@ -28,7 +28,7 @@ export function summarise(input: Record<string, unknown>): string {
 export function ToolLine({ item, root, frame }: { item: ToolItem; root: string; frame: number }) {
   const mark = !item.done ? h(Text, { color: "yellow" }, spinnerFrames[frame % spinnerFrames.length]) : item.ok ? h(Text, { color: "green" }, "✓") : h(Text, { color: "red" }, "✗");
   const bits: ReactNode[] = [mark, " "];
-  if (item.source === "http") bits.push(h(Text, { color: "magenta" }, "http "));
+  if (item.source === "http" || item.source === "mcp") bits.push(h(Text, { color: "magenta" }, `${item.source} `));
   bits.push(h(Text, { bold: true }, item.name));
   const args = summarise(item.input);
   if (args) bits.push(h(Text, { dimColor: true }, ` ${gist(args, item.done && item.images?.length ? 50 : 70)}`));

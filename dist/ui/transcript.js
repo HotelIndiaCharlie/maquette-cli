@@ -14,8 +14,8 @@ export function summarise(input) {
 export function ToolLine({ item, root, frame }) {
     const mark = !item.done ? h(Text, { color: "yellow" }, spinnerFrames[frame % spinnerFrames.length]) : item.ok ? h(Text, { color: "green" }, "✓") : h(Text, { color: "red" }, "✗");
     const bits = [mark, " "];
-    if (item.source === "http")
-        bits.push(h(Text, { color: "magenta" }, "http "));
+    if (item.source === "http" || item.source === "mcp")
+        bits.push(h(Text, { color: "magenta" }, `${item.source} `));
     bits.push(h(Text, { bold: true }, item.name));
     const args = summarise(item.input);
     if (args)

@@ -51,7 +51,7 @@ test("stdio pagination, exact routing, structured/image/error results, optional 
   const tool = s.tools.find(x => x.name === "local__read_echo")!; assert.equal(classify(tool), "change", "remote name/hint alone grants no read permission");
   assert.equal(s.tools.filter(x => x._maquette?.server === "local").length, 2);
   const r = await s.enqueue(exposedName("local", "odd.name"), { text: "ok", fail: true }, "http");
-  assert.equal(r.ok, false); assert.deepEqual(r.result!.structuredContent, { original: "odd.name", args: { text: "ok", fail: true } }); assert.equal(r.images.length, 1);
+  assert.equal(r.ok, false); assert.deepEqual(r.result!.structuredContent, { original: "odd.name", args: { text: "ok", fail: true } }); assert.equal(r.images.length, 1); assert.match(r.text, /structuredContent/);
   assert.equal((await s.enqueue("inspect_document", {}, "prompt")).ok, true);
   const old = tool._maquette!.identity; await s.reconnect("local");
   assert.equal((await s.enqueue(tool.name, {}, "model", { identity: old })).ok, false);
@@ -113,4 +113,22 @@ test("external SDK MCP client shares the HTTP runtime and owns only a runtime it
   await Promise.all([runtime.enqueue("inspect_document", {}, "prompt"), client.callTool({ name: "inspect_document", arguments: {} })]);
   assert.deepEqual(calls, ["prompt", "mcp"]);
   await client.close(); assert.ok(await discover(root, runtime.port, "0.1.0"));
+});
+
+test("two simultaneous stdio facades launch one owned runtime, attached disconnect keeps it alive", async t => {
+  const root = temp(), home = temp(), port = await closedPort();
+  const clients = [new Client({ name: "one", version: "1" }), new Client({ name: "two", version: "1" })];
+  const transports = clients.map(() => new StdioClientTransport({ command: process.execPath, args: [cli, "mcp", "--port", String(port)], cwd: root, env: { ...process.env, HOME: home, MAQUETTE_ENGINE: engine } as any, stderr: "pipe" }));
+  for (const tr of transports) tr.stderr?.on("data", () => {});
+  t.after(async () => { for (const c of clients) await c.close(); });
+  await Promise.all(clients.map((c, i) => c.connect(transports[i])));
+  const identity = (await discover(root, port, "0.1.0"))!;
+  const owner = transports.findIndex(tr => tr.pid === identity.ownerPid); assert.ok(owner >= 0);
+  const guest = 1 - owner;
+  await clients[owner].callTool({ name: "open_document", arguments: { path: "shared.designcraft" } });
+  const seen = await clients[guest].callTool({ name: "inspect_document", arguments: {} }); assert.match(JSON.stringify(seen.content), /shared.designcraft/);
+  await clients[guest].close(); assert.ok(await discover(root, port, "0.1.0"));
+  await clients[owner].close();
+  for (let i = 0; i < 100 && await discover(root, port, "0.1.0"); i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(await discover(root, port, "0.1.0"), undefined);
 });

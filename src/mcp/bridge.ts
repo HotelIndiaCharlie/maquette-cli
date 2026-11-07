@@ -5,6 +5,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from "@model
 import type { ServerHandle } from "../server.ts";
 
 export async function serveBridge(runtime: ServerHandle, version: string) {
+  for (const s of await runtime.mcpStatus()) if (s.state !== "connected" && s.state !== "disabled") console.error(`MCP ${s.name}: ${s.state}. ${s.message ?? ""}`);
   const caller = `mcp:${randomUUID()}`;
   const bridge = new Server({ name: "maquette", version }, { capabilities: { tools: { listChanged: true } }, instructions: `Shared Maquette runtime in ${runtime.root}. Tool calls use this host's authorization, independent of the terminal permission mode.` });
   bridge.setRequestHandler(ListToolsRequestSchema, async () => { await runtime.refresh(); return { tools: runtime.tools.map(({ _maquette, ...t }) => t) as Tool[] }; });

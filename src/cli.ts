@@ -187,6 +187,7 @@ async function serve() {
     const tick = paint(32, "✓");
     const traced = await trace(server, undefined, (text, level) => console.log(`  ${level === "warn" ? paint(33, "!") : tick} ${text}`));
     tracing = traced.tracing;
+    for (const s of await server.mcpStatus()) if (s.state !== "connected" && s.state !== "disabled") console.error(`MCP ${s.name}: ${s.state}. ${s.message ?? ""}`);
     console.log(`\n  ${tick} ${engineName}, headless, with Maquette's tools (${server.tools.length} tools)`);
     console.log(`  ${tick} Working in ${paint(1, tilde(root))}: DesignCraft reads and writes only here`);
     console.log(`  ${tick} Listening on ${paint(1, `http://127.0.0.1:${port}`)} for other sessions`);
@@ -206,7 +207,8 @@ async function serve() {
 
   const { AgentSession } = await import("./agent/session.ts");
   const { runApp } = await import("./ui/app.ts");
-  session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume });
+  try { session = new AgentSession({ server, settings, projectFile: loaded.files.project, copyExample, persist: true, resume }); }
+  catch (e) { await server.stop(); fail((e as Error).message); }
   const traced = await trace(server, session, (text, level) => session.notice(text, level));
   tracing = traced.tracing;
   process.on("SIGTERM", () => void stop());

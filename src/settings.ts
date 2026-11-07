@@ -113,7 +113,7 @@ function readFile(path: string): Record<string, unknown> {
   try {
     json = JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {
-    throw new SettingsError(`${path} isn't valid JSON: ${(e as Error).message}`);
+    throw new SettingsError(`${path} isn't valid JSON. Contents hidden to protect credentials; open the file to fix its syntax.`);
   }
   if (typeof json !== "object" || json === null || Array.isArray(json)) throw new SettingsError(`${path} must hold a JSON object.`);
   return json as Record<string, unknown>;

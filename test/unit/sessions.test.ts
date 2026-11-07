@@ -55,3 +55,15 @@ test("agent saves before effects, resume never replays and resets grants; clear 
   assert.equal(server.calls.length, count); assert.equal(resumed.allowed.size, 0); assert.equal(resumed.needsInspection, true);
   await resumed.submit("/clear"); assert.notEqual(resumed.journal!.id, id); assert.equal(listSessions(server.root).length, 2); resumed.close();
 });
+
+test("a process crash releases ownership on recovery; unsupported versions and corrupt message shapes fail usefully", async () => {
+  const { spawnSync } = await import("node:child_process"); const { pathToFileURL } = await import("node:url");
+  const dir = root();
+  const script = `import { SessionJournal } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "src/agent/sessions.ts")).href)}; const j = new SessionJournal(${JSON.stringify(dir)}, { provider: "fake", model: "fake" }); j.append("call_start", {id:"crash"}); process.stdout.write(j.id); process.exit(0);`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" }); assert.equal(child.status, 0, child.stderr);
+  const recovered = new SessionJournal(dir, { provider: "fake", model: "fake", resume: child.stdout }); assert.equal(recovered.restore().uncertain, true); const path = recovered.path; recovered.close();
+  const raw = readFileSync(path, "utf8"); writeFileSync(path, raw.replace('"v":1', '"v":99'));
+  assert.throws(() => new SessionJournal(dir, { ...options, resume: child.stdout }), /Unsupported session version/);
+  writeFileSync(path, raw + JSON.stringify({ v: 1, seq: raw.trim().split("\n").length + 1, at: "today", type: "message", data: { role: "assistant", parts: [{ type: "tool_call", id: "bad" }] } }) + "\n");
+  assert.throws(() => new SessionJournal(dir, { ...options, resume: child.stdout }), /Invalid message/);
+});

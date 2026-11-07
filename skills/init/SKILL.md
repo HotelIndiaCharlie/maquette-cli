@@ -13,7 +13,7 @@ Call `document_survey`. If no document is open, it lists the documents in the fo
 
 - One document: open it with `open_document`, then call `document_survey` again.
 - Several: ask which one in your round of questions (step 3), and survey it once the person answers.
-- None: say so, and say that `open_document <file>` or `example` gets one; stop there.
+- None: say so, read the relevant supporting evidence in step 1b, then ask how to obtain the working document (`open_document <file>` or `example`). Do not invent visual rules or create a layout unasked.
 
 If the document came from InDesign (`.idml`, `.indd`, `.indt`), DesignCraft never saves over it. Save a working copy once it's open, `save_document --path <same name>.designcraft`, and name that file in MAQUETTE.md as the working file. If there's already a `.designcraft` copy beside it, ask which is the working file instead of making another.
 

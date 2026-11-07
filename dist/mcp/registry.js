@@ -41,10 +41,12 @@ export class ToolRegistry {
     #clients = new Map();
     #generation = new Map();
     #builtins = [];
+    #builtinGeneration = randomUUID();
     #builtin;
     #changed;
     #closing = false;
     #pending = new Set();
+    #reconnecting = new Map();
     constructor(root, version, builtin, changed, home) {
         this.#root = root;
         this.#version = version;
@@ -66,6 +68,7 @@ export class ToolRegistry {
     async refreshBuiltin() {
         try {
             this.#builtins = await allTools(this.#builtin);
+            this.#builtinGeneration = randomUUID();
             this.publish();
         }
         catch { }
@@ -73,8 +76,8 @@ export class ToolRegistry {
     publish(external) {
         if (this.#closing)
             return;
-        const tools = [...this.#builtins];
-        const owners = new Map(this.#builtins.map(t => [t.name, { identity: `builtin:${t.name}`, client: this.#builtin, original: t.name, timeout: 600_000 }]));
+        const tools = this.#builtins.map(t => ({ ...t, _maquette: { server: "builtin", identity: `${this.#builtinGeneration}:${t.name}`, builtin: true } }));
+        const owners = new Map(this.#builtins.map(t => [t.name, { identity: `${this.#builtinGeneration}:${t.name}`, client: this.#builtin, original: t.name, timeout: 600_000 }]));
         // Keep other connections exactly; replacing one changes only its identities.
         for (const [name, owner] of this.owners)
             if (owner.server && owner.server !== external?.name && this.#clients.get(owner.server) === owner.client) {
@@ -97,7 +100,16 @@ export class ToolRegistry {
         this.revision++;
         this.#changed();
     }
-    async reconnect(name) {
+    reconnect(name) {
+        const previous = this.#reconnecting.get(name) ?? Promise.resolve();
+        const task = previous.catch(() => { }).then(() => this.replace(name));
+        this.#reconnecting.set(name, task);
+        this.track(task);
+        void task.finally(() => { if (this.#reconnecting.get(name) === task)
+            this.#reconnecting.delete(name); }).catch(() => { });
+        return task;
+    }
+    async replace(name) {
         if (this.#closing)
             return;
         const config = loadMcpConfig(this.#root, this.#home);
@@ -138,8 +150,9 @@ export class ToolRegistry {
             // Server stderr may include credentials; drain it without copying it to traces/UI.
             if (transport instanceof StdioClientTransport)
                 transport.stderr?.on("data", () => { });
-            await client.connect(transport, { timeout: 10_000 });
-            const tools = await allTools(client);
+            let timer;
+            const connect = async () => { await client.connect(transport, { timeout: 10_000 }); return await allTools(client); };
+            const tools = await Promise.race([connect(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Connection deadline exceeded")), 10_000); })]).finally(() => clearTimeout(timer));
             if (this.#closing || this.#generation.get(name) !== generation) {
                 await client.close();
                 return;
@@ -178,7 +191,7 @@ export class ToolRegistry {
             this.#clients.delete(name);
             await client?.close().catch(() => { });
             status.state = /401|403|Unauthorized/i.test(String(e)) ? "auth-required" : "failed";
-            status.message = String(e).includes("Missing environment variable") ? e.message : "Connection/discovery failed (details hidden to protect credentials). Check configuration and reconnect; interactive OAuth is not enabled.";
+            status.message = /Missing environment variable|Tool name collision|pagination cursor|exceeds 10000 tools/.test(String(e)) ? e.message : "Connection/discovery failed (details hidden to protect credentials). Check configuration and reconnect; interactive OAuth is not enabled.";
             this.publish();
         }
     }

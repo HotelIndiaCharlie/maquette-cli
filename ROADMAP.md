@@ -1,6 +1,8 @@
 # Roadmap: Maquette as an AI terminal
 
-Today `maquette` is a prompt that takes tool calls (`chart_create firstlight:slot:01 @spec.json`) and an HTTP server that lets other terminals and Claude Code sessions drive the same DesignCraft document. To do anything with a model you open a second terminal, run `claude`, and paste the "driving it from another session" prompt.
+**Implementation update — 7 November 2026:** HOT-56 save/list/resume → HOT-54 MCP/shared runtime → HOT-55 skills → HOT-63 folder-aware init → HOT-56 compaction/change notices are implemented on `codex/cli-foundations` for review. Bet 2 remains the ownership milestone; Bet 1 gates are unchanged. HOT-57/61/65 are excluded. See [testing and limits](docs/cli-foundations-testing.md). Historical phase descriptions below are superseded where they conflict.
+
+Originally `maquette` was a prompt that takes tool calls (`chart_create firstlight:slot:01 @spec.json`) and an HTTP server that lets other terminals and Claude Code sessions drive the same DesignCraft document. To do anything with a model you open a second terminal, run `claude`, and paste the "driving it from another session" prompt.
 
 The goal of this roadmap is one terminal: you type `maquette`, you talk to it in plain sentences, it plans and calls DesignCraft, Maquette's tools, MCP servers and shell commands itself, and it shows you what it did. The model behind it is a setting, and it can be any model, including one running on your own machine.
 
@@ -97,7 +99,7 @@ These are ordinary tool modules in the sense of `src/tools/types.ts`, so they al
 
 **As built (HOT-53):** one module, `src/tools/workspace/`, loaded by the engine like the others. The tool that opens a file is `open_file`, not `open`, since `open` is a prompt command and a tool's name typed first runs it directly, which would turn "open the report" into a call. `open_file` counts as a change, because opening a file can run it. `view_image` reads any path, `~` included, but only image bytes; the other file tools go through `confine()`, which follows every symlink and checks a not-yet-existing file through its nearest existing folder. `glob` is Maquette's own (`**`, `*`, `?`, `{a,b}`, `[…]`) rather than `fs.glob`, and skips `node_modules` and `.git`. `bash` shares `src/agent/shell.ts` with `!`, which now runs each command in its own process group so a timeout or Ctrl-C stops what it started; the timeout is 120 s by default, at most 300. The stub engine carries the real workspace tools, so `npm run smoke` runs the done-when sentence with the fake model: `bash` asks, `read_file` doesn't, then the chart and the save.
 
-### Phase 4: MCP servers
+### Phase 4: MCP servers (HOT-54, implemented for review)
 
 Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engine.ts` on stdio). This phase generalises both.
 
@@ -107,7 +109,7 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 
 **Done when:** a project with a `.mcp.json` listing a second server gets that server's tools at the `maquette ›` prompt, and Claude Code with Maquette in its own `.mcp.json` shares the running document.
 
-### Phase 5: Skills and project instructions
+### Phase 5: Skills and project instructions (HOT-55/HOT-63, implemented for review)
 
 - `MAQUETTE.md` in the project folder is read into the system prompt, like `CLAUDE.md`: the design memory of one document, kept next to it. It is the project layer of four, in this order of authority: **system** (the core, part of Maquette, never a file), **studio** (a design team's house rules), **user** (one person's preferences and language) and **project**. When they conflict, the core always wins; the person's current request wins over the other three, but a departure is named in one line with an offer to record it; the project wins over user and studio for facts about this document; a studio rule marked as a must wins over a user preference. Studio and user files are a later phase (HOT-61); the mechanism (HOT-60) takes them as further blocks.
 - The skill catalogue goes in the environment block, so it's cached with the rest of the session's facts.
@@ -118,14 +120,14 @@ Maquette already is an MCP client (of DesignCraft) and an MCP server (`src/engin
 
 **Done when:** `/report-review` renders the document page by page and the model describes what it sees, and a user-written skill appears in the list with no code change.
 
-### Phase 6: Sessions and context
+### Phase 6: Sessions and context (HOT-56, implemented for review)
 
 - Conversations are saved as JSONL in `.maquette/sessions/`. `maquette --resume` picks the last one, `--resume <id>` a given one, `/sessions` lists them.
 - `/compact` summarises the history with the current model so it works on every provider; on Anthropic the server-side compaction from Phase 1 does it automatically first.
-- Tool results are trimmed in history after they have been seen (keep the first lines and the image path), since renders and `inspect_document` output are large.
+- Heavy results are bounded only at first ingestion with references to complete outputs; previously sent history/native blocks are never rewritten. Explicit /compact creates a new context branch retaining recent whole groups.
 - Change notices: when an HTTP caller changes the document, the next model turn gets a short note ("another session ran `chart_update` on slot 02"), closing the gap listed under "Not built yet" in the README.
 
-### Phase 7: Polish
+### Phase 7: Polish (HOT-57 deferred; not implemented)
 
 - Hooks in settings (`beforeTool`, `afterTool`, `onStop`), shell commands that run on events, as in Claude Code.
 - A non-TTY mode that reads messages from stdin and writes JSON events to stdout, so Maquette itself can be driven as an agent by another program.

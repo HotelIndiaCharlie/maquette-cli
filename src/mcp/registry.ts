@@ -40,10 +40,12 @@ export class ToolRegistry {
   #clients = new Map<string, Client>();
   #generation = new Map<string, string>();
   #builtins: Tool[] = [];
+  #builtinGeneration = randomUUID();
   #builtin: Client;
   #changed: () => void;
   #closing = false;
   #pending = new Set<Promise<unknown>>();
+  #reconnecting = new Map<string, Promise<void>>();
   constructor(root: string, version: string, builtin: Client, changed: () => void, home?: string) {
     this.#root = root; this.#version = version; this.#builtin = builtin; this.#changed = changed; this.#home = home;
   }
@@ -58,12 +60,12 @@ export class ToolRegistry {
   }
   track(p: Promise<unknown>) { this.#pending.add(p); void p.catch(() => {}).finally(() => this.#pending.delete(p)); }
   async refreshBuiltin() {
-    try { this.#builtins = await allTools(this.#builtin); this.publish(); } catch {}
+    try { this.#builtins = await allTools(this.#builtin); this.#builtinGeneration = randomUUID(); this.publish(); } catch {}
   }
   publish(external?: { name: string; tools: Tool[]; client: Client; generation: string; timeout: number; trustRead: boolean }) {
     if (this.#closing) return;
-    const tools = [...this.#builtins];
-    const owners = new Map<string, Owner>(this.#builtins.map(t => [t.name, { identity: `builtin:${t.name}`, client: this.#builtin, original: t.name, timeout: 600_000 }]));
+    const tools: Tool[] = this.#builtins.map(t => ({ ...t, _maquette: { server: "builtin", identity: `${this.#builtinGeneration}:${t.name}`, builtin: true } }));
+    const owners = new Map<string, Owner>(this.#builtins.map(t => [t.name, { identity: `${this.#builtinGeneration}:${t.name}`, client: this.#builtin, original: t.name, timeout: 600_000 }]));
     // Keep other connections exactly; replacing one changes only its identities.
     for (const [name, owner] of this.owners) if (owner.server && owner.server !== external?.name && this.#clients.get(owner.server) === owner.client) {
       if (owners.has(name)) throw new Error(`Tool name collision: ${name}`);
@@ -78,7 +80,14 @@ export class ToolRegistry {
     this.tools = tools; this.byName = new Map(tools.map(t => [t.name, t])); this.owners = owners;
     this.revision++; this.#changed();
   }
-  async reconnect(name: string) {
+  reconnect(name: string): Promise<void> {
+    const previous = this.#reconnecting.get(name) ?? Promise.resolve();
+    const task = previous.catch(() => {}).then(() => this.replace(name));
+    this.#reconnecting.set(name, task); this.track(task);
+    void task.finally(() => { if (this.#reconnecting.get(name) === task) this.#reconnecting.delete(name); }).catch(() => {});
+    return task;
+  }
+  private async replace(name: string) {
     if (this.#closing) return;
     const config = loadMcpConfig(this.#root, this.#home);
     const entry = config.entries.find(e => e.name === name);
@@ -101,8 +110,9 @@ export class ToolRegistry {
         : new StreamableHTTPClientTransport(new URL(c.url!), { requestInit: { headers: c.headers } });
       // Server stderr may include credentials; drain it without copying it to traces/UI.
       if (transport instanceof StdioClientTransport) transport.stderr?.on("data", () => {});
-      await client.connect(transport, { timeout: 10_000 });
-      const tools = await allTools(client);
+      let timer: ReturnType<typeof setTimeout>;
+      const connect = async () => { await client!.connect(transport, { timeout: 10_000 }); return await allTools(client!); };
+      const tools = await Promise.race([connect(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Connection deadline exceeded")), 10_000); })]).finally(() => clearTimeout(timer!));
       if (this.#closing || this.#generation.get(name) !== generation) { await client.close(); return; }
       this.#clients.set(name, client);
       const current = client;
@@ -126,7 +136,7 @@ export class ToolRegistry {
     } catch (e) {
       this.#clients.delete(name); await client?.close().catch(() => {});
       status.state = /401|403|Unauthorized/i.test(String(e)) ? "auth-required" : "failed";
-      status.message = String(e).includes("Missing environment variable") ? (e as Error).message : "Connection/discovery failed (details hidden to protect credentials). Check configuration and reconnect; interactive OAuth is not enabled.";
+      status.message = /Missing environment variable|Tool name collision|pagination cursor|exceeds 10000 tools/.test(String(e)) ? (e as Error).message : "Connection/discovery failed (details hidden to protect credentials). Check configuration and reconnect; interactive OAuth is not enabled.";
       this.publish();
     }
   }

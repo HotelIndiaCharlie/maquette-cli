@@ -27,7 +27,7 @@ export async function discover(root, port, version) {
 export async function attachRuntime(identity, port) {
     const caller = `terminal:${randomUUID()}`;
     const request = async (path, body) => {
-        const r = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { "x-maquette-root": identity.root, ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }), signal: AbortSignal.timeout(610_000) });
+        const r = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { "x-maquette-root": identity.root, ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }), signal: AbortSignal.timeout(path === "/call" ? 610_000 : path === "/mcp/reconnect" ? 15_000 : 5000) });
         if (!r.ok)
             throw new Error(`Shared runtime request failed (${r.status}); no call was retried.`);
         return await r.json();
@@ -35,11 +35,13 @@ export async function attachRuntime(identity, port) {
     let data = await request("/tools");
     let last;
     const handle = {
-        root: identity.root, port, identity, get revision() { return data.revision; }, get tools() { return data.tools; }, get byName() { return new Map(data.tools.map((t) => [t.name, t])); },
+        root: identity.root, port, identity, get changeSequence() { return data.changeSequence; },
+        async changes(cursor) { return await request(`/changes${cursor ? `?runtime=${encodeURIComponent(cursor.runtime)}&after=${cursor.after}` : ""}`); },
+        get revision() { return data.revision; }, get tools() { return data.tools; }, get byName() { return new Map(data.tools.map((t) => [t.name, t])); },
         get instructions() { return data.instructions; }, images: "maquette-renders", lastImage: () => last,
-        async enqueue(tool, args, source, options) { const r = await request("/call", { tool, arguments: args, source, caller: options?.caller ?? caller, identity: options?.identity }); last = r.images?.at(-1) ?? last; return r; },
-        async refresh() { const current = await request("/tools"); if (current.runtimeId !== identity.runtimeId)
-            throw new Error("Runtime restarted; reconnect and inspect current state before continuing."); data = current; },
+        async enqueue(tool, args, source, options) { const r = await request("/call", { tool, arguments: args, source, caller: options?.caller ?? caller, identity: options?.identity, cursor: options?.cursor }); last = r.images?.at(-1) ?? last; return r; },
+        async refresh() { const current = await request("/tools"); if (current.protocol !== runtimeProtocol || current.root !== identity.root || current.version !== identity.version)
+            throw new Error("Runtime identity changed to an incompatible process/project; reconnect explicitly."); identity.runtimeId = current.runtimeId; data = current; },
         async mcpStatus() { return (await request("/mcp")).servers; }, async reconnect(name) { await request("/mcp/reconnect", { name }); await handle.refresh(); },
         on() { return () => { }; }, async stop() { },
     };
@@ -57,7 +59,7 @@ export async function ensureRuntime(options, launch) {
     catch (e) {
         if (!/Already owned|Ownership is being checked|Port .* is in use/.test(e.message))
             throw e;
-        const deadline = Date.now() + 20_000;
+        const deadline = Date.now() + 30_000;
         while (Date.now() < deadline) {
             const id = await discover(root, options.port, options.version);
             if (id)

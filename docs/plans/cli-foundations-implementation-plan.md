@@ -1,14 +1,14 @@
 # CLI foundations: implementation specification and delivery plan
 
-Status: implementation authorized and started on 7 November 2026, per explicit owner handover. No release, deploy or automatic merge is authorized.
+Status: implementation completed for review on 7 November 2026, per explicit owner handover. No release, deploy or automatic merge is authorized.
 
 Execution order: HOT-56 save/list/resume → HOT-54 → HOT-55 → HOT-63 → HOT-56 compaction/change notices. The real integration is DesignCraft shared by the terminal and an external MCP client; other applications are fixture-only in this scope. This supersedes historical planning-only and target-app-open notes below.
 
 Scope: [HOT-54](https://linear.app/hotelindiajuliet/issue/HOT-54), [HOT-55](https://linear.app/hotelindiajuliet/issue/HOT-55), [HOT-63](https://linear.app/hotelindiajuliet/issue/HOT-63), [HOT-56](https://linear.app/hotelindiajuliet/issue/HOT-56). These are accepted foundations for app connectivity and recurring publication work. They are assigned to Bet 2 for ownership; this does not assert that its gate has opened.
 
-The active scope is HOT-54, HOT-55, HOT-63 and HOT-56. The owner has deferred HOT-57 and retained HOT-56 for direct personal use of Maquette with DesignCraft. HOT-54/56 are no longer Parked. This supersedes earlier scope/parking notes for these issues. D2 still stands: the CLI is the shared engine interface and development surface; Maquette's product front end remains separate. D3 (living data components first) and the Bet 1 gate remain unchanged. No cycle, deadline, assignment, implementation or release is initiated.
+The active scope is HOT-54, HOT-55, HOT-63 and HOT-56. The owner has deferred HOT-57 and retained HOT-56 for direct personal use of Maquette with DesignCraft. HOT-54/56 are no longer Parked. This supersedes earlier scope/parking notes for these issues. D2 still stands: the CLI is the shared engine interface and development surface; Maquette's product front end remains separate. D3 (living data components first) and the Bet 1 gate remain unchanged. No cycle, deadline, assignment or release is initiated; implementation was explicitly authorized in the subsequent owner handover.
 
-## Verified implementation baseline
+## Pre-implementation baseline (historical)
 
 Inspected local source on 7 November 2026:
 - src/server.ts owns an engine child process, one FIFO queue, HTTP /tools and /call. Its tool list is currently static and its Reply normalizes results to text and image paths.
@@ -33,14 +33,15 @@ HOT-56 stays in scope specifically for the owner's direct personal trials with M
 
 | Order | Issue | Deliverable | Prerequisite within this plan |
 | --- | --- | --- | --- |
-| 1 | HOT-54 | Typed MCP configuration; common runtime registry; app connections; shared stdio facade | None |
-| 2 | HOT-55 | Shared skill resolver/catalogue, engine reader, /<skill>, bundled guidance | None; lands after 54 to integrate with the final catalogue |
-| 3 | HOT-63 | Bounded folder map; survey integration; file-aware init | HOT-55's unified init resolver |
-| 4 | HOT-56 | Session journal/resume first for personal use; compaction and change notices later | First resume slice is independent; shared change feed integrates with HOT-54 |
+| A | HOT-56 | Save/list/resume for personal use | Independent of new MCP connections |
+| B | HOT-54 | Typed configuration, registry, SDK transports, shared facade | Existing runtime |
+| C | HOT-55 | Shared skills and init resolver | Catalogue integration after B |
+| D | HOT-63 | Shared bounded folder map and supporting evidence | Unified init resolver |
+| E | HOT-56 | Compaction branches and shared change feed | Runtime contract from B |
 
 The order is a review/landing sequence, not a requirement to code all four in a single change. Each numbered slice inside an issue is a separate reviewable PR candidate. Use issue IDs rather than the old phase numbers to determine order. No estimated calendar dates are committed before the first connectivity slice establishes actual app/auth requirements and the implementation owner is assigned.
 
-At implementation kickoff, name the first external app and whether it offers stdio, HTTP, configured credentials or OAuth-only auth. This is the only product integration input still outstanding. It does not prevent implementing fixtures, common MCP support, skills, folder discovery or session contracts. It does prevent declaring a named app integration complete without live evidence.
+The agreed real integration is DesignCraft shared between the terminal and an external SDK MCP client. Additional stdio, HTTP and explicit legacy SSE servers are exercised with local fixtures. No named external application, Figma integration or interactive OAuth is required or claimed.
 
 ## Cross-cutting implementation rules
 
@@ -51,7 +52,7 @@ At implementation kickoff, name the first external app and whether it offers std
 5. Project instructions, skill bodies and external server descriptions cannot grant permissions. Session resume refreshes actual settings.
 6. Keep tests offline with fake providers and SDK/stub servers. Live DesignCraft/app verification is a separate release gate with recorded evidence.
 7. Ship each slice behind absence-by-default configuration where possible. A failed optional server or malformed skill must not disable the built-in DesignCraft path. Existing sessions and config files continue to work.
-8. Keep source and generated dist together when implementation changes src. This planning change touches documentation only.
+8. Keep source and generated dist together when implementation changes src. Source changes include generated dist.
 
 ## Validation and release gates
 
@@ -65,12 +66,12 @@ For each implementation slice, run npm run typecheck and targeted meaningful uni
 | Recovery | Restart/resume preserves provider-native history, never retries an uncertain mutation and notices runtime/document changes |
 | Regression | Existing calls/tools/HTTP, chart fixtures, image round trips, project memory and the terminal still work |
 
-No tests or live integrations have been run for this planning-only change. Acceptance cases describe future required evidence, not present results.
+Implementation verification and actual evidence are recorded in the [delivery report](cli-foundations-delivery-report.md) and [testing guide](../cli-foundations-testing.md). The historical acceptance cases below remain the behavior contract, subject to the explicit owner scope above.
 
 ## Main risks and limits
 
 - App connectivity is bounded by the selected app's server capabilities and authentication. A generic MCP client alone does not create a Figma or Adobe integration, nor a live DesignCraft window connection.
-- The shared HTTP result currently loses some MCP structure; raw-result preservation is part of HOT-54, before the facade ships.
+- HTTP retains compatible text/image fields and the complete MCP result in `result`, including structuredContent and isError.
 - Signed provider histories cannot be casually trimmed. HOT-56 deliberately uses new context branches for compaction and never edits retained native blocks.
 - A session journal is not a saved layout document. Restarting still requires explicit inspection of the current engine/document.
 - HOT-65 (PDF reader) and HOT-61 (studio/user prompt layers) stay outside this scope. PDF discovery can ship with an explicit unread-file limitation.
@@ -107,7 +108,7 @@ No tests or live integrations have been run for this planning-only change. Accep
 - Broken config, missing env, untrusted project config, connection failure and timeout leave DesignCraft usable and reveal no credentials.
 - A facade and terminal targeting the same root/port operate one stub document, in FIFO order. Two simultaneous facade starts produce one runtime. Another root on the port is refused.
 - Disconnect during a write reports an uncertain outcome without retrying. Shutdown leaves no owned child processes.
-- A live DesignCraft check plus one available external app connection is recorded before release. The target app and its authentication requirement must be named at implementation kickoff; fixture success alone is not evidence of app compatibility.
+- Record live DesignCraft shared with an external MCP client. Other server transports are fixture-only; fixture success is not evidence of named app compatibility.
 
 ---
 

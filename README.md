@@ -98,7 +98,7 @@ What you type decides what happens:
 | A sentence | Goes to the model, which calls tools until the job is done. Each call gets a line: `✓` or `✗`, the tool, its arguments, how long it took, any render's path. |
 | `<tool> …` | Calls a tool yourself, with its arguments as flags (below), with no model in the way. The model is told what you ran. |
 | `!<command>` | Runs a shell command in Maquette's folder. Its output shows and stays in the conversation, so you can ask about it. |
-| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/clear`, `/cost`, `/tools`, and `/init [note]`, which surveys the document, asks two or three questions and writes `MAQUETTE.md` (below) |
+| `/help` | The slash commands: `/model [id]`, `/provider [name]`, `/permissions [ask\|auto\|plan]`, `/sessions`, `/clear`, `/compact [focus]`, `/cost`, `/tools`, `/mcp`, `/skills`, and `/init [note]`, which surveys the document and supporting files, asks unresolved questions and writes `MAQUETTE.md` (below) |
 | `tools`, `help`, `help <tool>` | The tools one line each; how to type calls; one tool's description and flags. `help chart_create` gives the whole chart spec format. |
 | `example` | Copies the example report into `./example/` |
 | `open` | Opens the last image in Preview |
@@ -109,15 +109,15 @@ What you type decides what happens:
 **Keys:** Tab completes tool names, flags, `/` commands and file paths; ↑ and ↓ bring back earlier lines; shift+enter, or a `\` at the end of the line, adds a line; Ctrl-C stops the model's turn, or clears the line, or on an empty line exits; `ctrl+o` expands the last tool line to its full arguments and result; `esc` dismisses a notice; `?` on an empty line lists the shortcuts.
 
 - **The screen** is drawn with [Ink](https://github.com/vadimdemedes/ink), like Claude Code's: finished output scrolls up above, the answer streams in with its Markdown, and the input box and the footer (model, effort, permission mode, tokens and, for Claude, dollars) stay at the bottom. When Maquette has no terminal, as under a script or `maquette < /dev/null`, it runs the server alone and prints one plain log line per call, as before.
-- **Other sessions:** their calls appear in the transcript marked `http`, in the order they ran between the model's own.
+- **Other sessions:** their direct calls appear in the transcript marked `http` or `mcp`, in the order they ran between the model's own.
 - **Renders go back to the model** as images, so a model that can see looks at its own work.
 - **Files and the shell:** the model reads, finds and edits files with `read_file`, `glob`, `grep`, `write_file` and `edit_file`, runs commands such as tests with `bash` (120 s timeout by default, output capped), looks at an image with `view_image` and shows you one with `open_file`. The file tools only reach inside Maquette's folder: a path that leads out, by `../`, an absolute path or a symlink, is refused. `view_image` is the exception, so it can look at `~/Desktop/reference.png`; it reads only images. In `ask` mode `bash`, writes, edits and `open_file` ask first; reads, `glob`, `grep` and `view_image` don't. Other sessions can call them too: `maquette call read_file example/specs/01-revenue.json`.
 - **`MAQUETTE.md`** in the folder, if present, is read into the model's instructions on every turn, like `CLAUDE.md`. It's the project's design memory: purpose and audience, voice, look and feel, conventions and decisions, kept short. It's the project layer of four (system, studio, user, project): the core, who Maquette is and how it works, is part of Maquette and not a file, and studio and user files come later. The model follows the file over its own defaults, does what you ask when you depart from it, and says so. Edit it mid-session and the next turn tells the model it changed.
-- **`/init`** starts a project from a `.designcraft`, `.idml`, `.indd` or `.indt` file in the folder (or the one below, as in an InDesign package). The model opens it, surveys it with `document_survey` (styles and how much each is used, swatches, fonts, labelled frames, every story's text, a small render of each page), asks two or three questions the pages can't answer, and writes `MAQUETTE.md` with `memory_write`, asking first in `ask` mode. A document from InDesign gets a working `.designcraft` copy, since DesignCraft never saves over the original. Run it again and it proposes changes instead of rewriting your words. Later, when you make a design call worth keeping, the model offers to add it under Decisions with `memory_add`. It works best with a model that can see the renders; without vision it says the result is text-only. A house version of the instructions in `.maquette/skills/init/SKILL.md` (this folder) or `~/.maquette/skills/init/SKILL.md` replaces Maquette's own, [`skills/init/SKILL.md`](skills/init/SKILL.md).
+- **`/init`** starts a project from a `.designcraft`, `.idml`, `.indd` or `.indt` file in the folder (or the one below, as in an InDesign package). The model opens it, surveys it with `document_survey` (styles and how much each is used, swatches, fonts, labelled frames, every story's text, a small render of each page), uses the folder map to select at most five supporting texts and three reference images, cites their relative paths, and asks only unresolved questions, and writes `MAQUETTE.md` with `memory_write`, asking first in `ask` mode. A document from InDesign gets a working `.designcraft` copy, since DesignCraft never saves over the original. Run it again and it proposes changes instead of rewriting your words. Later, when you make a design call worth keeping, the model offers to add it under Decisions with `memory_add`. It works best with a model that can see the renders; without vision it says the result is text-only. A house version of the instructions in `.maquette/skills/init/SKILL.md` (this folder) then `.claude/skills/init/SKILL.md`, then `~/.maquette/skills/init/SKILL.md` replaces Maquette's own, [`skills/init/SKILL.md`](skills/init/SKILL.md).
 - **Warnings from opening a document** (missing links or fonts, what converting from InDesign lost) show once as a notice, and are kept in `<file>.maquette.json` beside the document when it's saved, so a later survey still counts them. They never go in `MAQUETTE.md`.
 - **Local models that can't call tools** fall back to a text protocol: the model writes `maquette call …` lines, Maquette asks before running each and sends back the results. The footer then says `text calls`.
 - **Save before you stop:** the document lives only in DesignCraft until `save_document`.
-- **One at a time:** a second `maquette` on the same port says which folder the first one is working in, and exits. Pick another port with `--port`.
+- **One runtime per folder/port:** a second interactive terminal or `maquette mcp` attaches to the compatible runtime in the same canonical folder. Another folder/process on that port is refused. A noninteractive duplicate server exits. Only the owner stops its runtime; save before closing that owner.
 
 ## Arguments as flags
 
@@ -150,6 +150,38 @@ Paste this into the session while `maquette` is running:
 > 3. Write a chart spec to a JSON file (`example/specs/` has five), then `maquette call chart_create firstlight:slot:01 @<spec>.json`. The reply says whether every mark sits where the data puts it, and whether any text is overset, outside the frame or overlapping, and it gives a render. Add `--preview` to see the chart without placing it.
 > 4. `maquette call save_document`
 > 5. `maquette call render_page --page 0`, then Read the image path it prints
+
+## Saved conversations and context
+
+The interactive terminal journals messages, provider-native content, tool/direct/shell results and interruptions in `.maquette/sessions/<id>.jsonl`. Use `maquette --resume` for the latest conversation in the current canonical folder, or `--resume <id>`. `/sessions` lists IDs, dates, first-message excerpts and provider/model. `/clear` creates a new ID and keeps the old journal. A session has one writer; a crashed final line is recovered to a new copy, leaving the original unchanged. Invalid interior records or unsupported versions stop with recovery guidance.
+
+Resume restores conversation, resets session permission grants and rereads current settings, memory and tools. It does not open the old document or replay tools. Inspect current state before dependent edits. An interrupted call without a durable outcome is explicitly uncertain. Native signed blocks are reused only for the matching provider/model; other request views use normalized messages, while the journal retains the originals.
+
+`/compact [focus]` uses the current provider to summarize older complete groups and keeps recent groups, including their native blocks, intact. Cancellation/failure keeps the previous view. There is no automatic client-side compaction. Large tool text/images are capped on first ingestion with paths to complete outputs, never rewritten retroactively. Changes from other callers are attributed before the next model step; runtime restarts or feed gaps require inspection. External app calls are not described as DesignCraft edits without evidence.
+
+[Detailed testing guide, including a disposable personal resume trial](docs/cli-foundations-testing.md).
+
+## MCP connections and the shared facade
+
+`maquette mcp` is an SDK-based stdio facade over the same FIFO/runtime used by the terminal and HTTP. Configure the host to launch it in the **same project folder** with the same `--port`. It verifies runtime identity/version/root, starts one if absent under an exclusive ownership lock, and stops only a runtime it owns. stdout contains only MCP JSON-RPC. Direct HTTP/MCP calls use their host's authorization; the terminal's plan/ask mode does not gate them.
+
+Additional connections use whole-server replacement by name: user `~/.maquette/settings.json` < project `.mcp.json` < project `.maquette/settings.json`. `disabled: true` suppresses an inherited entry. Example project configuration (replace the command with your installed MCP server):
+
+```json
+{"mcpServers":{"local-app":{"type":"stdio","command":"your-installed-mcp-server","args":[],"env":{"API_KEY":"${LOCAL_APP_API_KEY}"}}}}
+```
+
+HTTP uses `type: "http"`, `url` and optional `headers`; legacy SSE requires `type: "sse"`. Environment references in env/headers fail usefully when missing and are not logged. `/mcp trust` asks explicit approval for the canonical project root and configuration hash; changes invalidate that trust. Untrusted project entries stay disconnected. `/mcp` lists states and `/mcp reconnect <name>` replaces a connection. Calls default to 120 seconds, configurable with `timeoutSeconds` (1–600). Optional failures leave DesignCraft available. External names are prefixed with server identity and safely shortened with hashes; a reverse map routes exact original names. External tools ask by default, even if their names suggest a read. An explicit `trustedReadOnly: true` policy may honor that server's `readOnlyHint`; plan mode otherwise excludes them.
+
+For web search, configure your chosen search MCP server (for example a provider offering Brave, Tavily or Exa) using its documented command/endpoint and credential variables. An HTTP shape is `{"mcpServers":{"search":{"type":"http","url":"https://YOUR_SEARCH_MCP_ENDPOINT","headers":{"Authorization":"Bearer ${SEARCH_MCP_TOKEN}"}}}}`. Search/fetched content is untrusted task data. This is a configuration recipe, not tested compatibility with those services. The verified real integration is DesignCraft shared with an external SDK MCP client; other stdio/HTTP/SSE servers are covered by local fixtures. No interactive OAuth flow is implemented.
+
+## Skills and folder-aware init
+
+`maquette skills [name]` and `/skills [name]` list sources, overrides and validation diagnostics; the CLI command needs no model or running engine. `/<name> <arguments>` loads a skill, while the ordinary read-only `skill` tool loads its body or a UTF-8 resource using an optional relative `path`. Resources are confined to the selected skill directory (128 KiB cap), without widening `read_file` or running scripts. Loading a skill grants no permissions.
+
+Precedence: project `.maquette/skills` → project `.claude/skills` → user `~/.maquette/skills` → bundled `skills`. Each direct `<name>/SKILL.md` uses Agent Skills YAML frontmatter with a matching lowercase name (1–64 letters/digits/single hyphens) and nonempty description (up to 1024 characters). Invalid entries warn and allow valid lower-precedence fallback. Built-in command collisions are skipped except specialized `/init`. Only names, descriptions and sources enter the initial prompt; bodies load on request. Catalogue/body edits are noticed at turn boundaries. Bundled: init, chart, report-review, designcraft.
+
+`tree --path . --depth 3` and `document_survey` share a deterministic map with file sizes and extension summaries, including when no document is open. Depth is 0–6, directories over 20 entries collapse, directory symlinks are not followed, and hidden folders/node_modules/.git/.maquette/maquette-renders are excluded. Discovery is bounded to 2000 visited entries, 250 output lines, 24 KiB and a two-second deadline; incomplete counts are explicitly partial. `/init` reads selected brief/guide evidence, asks which conflicting authority to follow, preserves its roughly 2000-token memory budget and waits for agreement before changing existing memory. PDFs are read only through an already installed pdftotext with ordinary bash permissions; otherwise they are explicitly unread.
 
 ## Settings
 
@@ -222,8 +254,10 @@ The server address is `providers.openai-compatible.baseUrl` (default `http://loc
 
 | Request | Reply |
 | --- | --- |
-| `POST /call` with `Content-Type: application/json` and body `{"tool": "<name>", "arguments": {…}}` | `{"id", "tool", "ok", "text", "images"}`: `ok` is false when the tool reported an error; `text` is the tool's text (DesignCraft's tools mostly return JSON as text); `images` are absolute paths |
+| `POST /call` with `Content-Type: application/json` and body `{"tool": "<name>", "arguments": {…}}` | `{"id", "tool", "ok", "text", "images", "result"}`: `result` preserves full MCP content, structuredContent and isError; `ok` is false when the tool reported an error; `text` is the tool's text (DesignCraft's tools mostly return JSON as text); `images` are absolute paths |
 | `GET /tools` | `{"root", "instructions", "project", "tools"}`: Maquette's folder, its instructions, the text of `MAQUETTE.md` (or null), read on each request, and the tool list as MCP gives it, with input schemas |
+
+`GET /identity` returns protocol/version, canonical root, runtime ID and owner PID. `GET /changes?runtime=<id>&after=<seq>` requires `x-maquette-root: <canonical root>` (or a matching root query parameter), and returns the current sequence, up to 1000 retained changes and a gap marker. Call bodies may supply a caller ID for attribution; this is coordination metadata, not authentication. `GET /mcp` lists optional connection states.
 
 An unknown tool, a body that isn't JSON, or `arguments` that aren't an object get a 400 with `{"ok": false, "text": "…"}`. A tool error is still a 200, with `ok: false`.
 
@@ -315,14 +349,12 @@ Before testing a ticket: `cd ~/maquette-cli-test && git fetch && git checkout <b
 
 To see what the agent does on each turn (every request to the model with its thinking, every tool call with where its time went, and why anything failed), start Maquette with `--trace` (`npm run dev -- --trace`, or `mqtb --trace`): it starts [Phoenix](https://github.com/Arize-ai/phoenix) in Docker, and Docker itself if need be, and traces to it on http://localhost:6006. [`docs/telemetry.md`](docs/telemetry.md) has the details.
 
-`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
+`dist/` is committed, so installing from GitHub needs no build step or dev dependencies. Run `npm run build` and commit `dist/` with any change to `src/`. `npm run test:foundations:live` verifies shared real DesignCraft, save/restart/resume and no replay. `npm run test:package` checks a packed install without dev dependencies and the installed MCP facade. `npm test` needs the DesignCraft CLI (`maquette install-designcraft`). The screen's components are plain `.ts` files calling `React.createElement` through `h`, not `.tsx`, so Node runs the source as is. `MAQUETTE_ENGINE=<script>` runs another engine in place of `src/engine.ts`; the tests use [`test/stub-engine.ts`](test/stub-engine.ts), which needs no DesignCraft.
 
 ## Not built yet
 
-[`ROADMAP.md`](ROADMAP.md) lays out the rest of the plan: other MCP servers, skills, saved sessions and `/compact`, hooks and a JSON mode.
+[`ROADMAP.md`](ROADMAP.md) records current scope. Hooks, JSON automation and a headless agent (HOT-57), studio/user prompt layers (HOT-61) and a dedicated PDF reader (HOT-65) remain deferred. `maquette ask` remains tool-less.
 
-- **Saved conversations.** A conversation lasts as long as `maquette` runs (Phase 6).
 - **Keeping hand changes** to a chart across `chart_update`. They're detected and reported.
 - **More charts:** stacked or grouped bars, more than two series, and areas.
 - **Live mode.** DesignCraft runs headless, so the tools that need the app window (`screenshot`, `click`, `menu_list` and the like) return an error.
-- **Change notices.** Callers aren't told when another caller changes the document; they see it on their next call. The model is told other sessions share the document and to inspect before changing.
