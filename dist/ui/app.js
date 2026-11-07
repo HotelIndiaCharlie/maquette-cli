@@ -5,6 +5,7 @@ import { Box, h, Text, useApp, useEffect, useRef, useState, useStdout } from "./
 import { InputBox } from "./input.js";
 import { Footer, Notices, PermissionPrompt, Picker, Progress, shortcuts, Turn } from "./parts.js";
 import { ToolLine, Transcript } from "./transcript.js";
+import { repairResize } from "./resize.js";
 export function startLines(info, root, status) {
     const tick = "\x1b[32m✓\x1b[0m";
     const bold = (s) => `\x1b[1m${s}\x1b[0m`;
@@ -183,7 +184,15 @@ export async function runApp(session, server, info) {
     const { render } = await import("ink");
     let left = false;
     const instance = render(h(App, { session, server, info, onExit: () => (left = true) }), { exitOnCtrlC: false, patchConsole: true });
-    await instance.waitUntilExit();
+    let removeResizeRepair = () => { };
+    try {
+        removeResizeRepair = await repairResize(process.stdout);
+        await instance.waitUntilExit();
+    }
+    finally {
+        removeResizeRepair();
+        instance.cleanup();
+    }
     if (!left)
         await session.submit("exit");
 }

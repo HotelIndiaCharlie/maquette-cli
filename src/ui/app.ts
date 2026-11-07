@@ -11,6 +11,7 @@ import { Box, h, Text, useApp, useEffect, useRef, useState, useStdout } from "./
 import { InputBox } from "./input.ts";
 import { Footer, Notices, PermissionPrompt, Picker, Progress, type Segment, shortcuts, Turn } from "./parts.ts";
 import { type Item, type ItemBody, type ToolItem, ToolLine, Transcript } from "./transcript.ts";
+import { repairResize } from "./resize.ts";
 
 // `trace` is the tracing line, when --trace or MAQUETTE_TRACE asked for it: on, or why it's off.
 export type Info = { version: string; engineName: string; toolCount: number; port: number; images: string; hint?: string; trace?: { ok: boolean; text: string } };
@@ -163,6 +164,8 @@ export async function runApp(session: AgentSession, server: ServerHandle, info: 
   const { render } = await import("ink");
   let left = false;
   const instance = render(h(App, { session, server, info, onExit: () => (left = true) }), { exitOnCtrlC: false, patchConsole: true });
-  await instance.waitUntilExit();
+  let removeResizeRepair = () => {};
+  try { removeResizeRepair = await repairResize(process.stdout); await instance.waitUntilExit(); }
+  finally { removeResizeRepair(); instance.cleanup(); }
   if (!left) await session.submit("exit");
 }
