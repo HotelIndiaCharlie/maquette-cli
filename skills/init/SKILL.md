@@ -19,6 +19,14 @@ If the document came from InDesign (`.idml`, `.indd`, `.indt`), DesignCraft neve
 
 If the survey says the document opened with warnings, say "opened with N warnings" in one line and nothing more. They don't go in MAQUETTE.md.
 
+## 1b. Read the folder's supporting evidence
+
+The survey includes a bounded folder map even without an open document. Use that map (or tree with a narrower path) to select **at most five supporting text files and three reference/linked images**. State the chosen relative paths and a short reason for each before reading them with read_file/view_image. Names alone are not evidence: actually read selected files. Prefer the brief and explicit brand/style guides to visual guesses. Do not open extra files merely to exhaust the budget.
+
+For a PDF guide, only use an already installed pdftotext through bash with normal permissions; first check its availability. If absent, explicitly state which PDF was not read and ask only for its missing guidance. Never install converters. Do not infer rules from an unread PDF.
+
+If guides conflict, ask which authority governs and wait before choosing. Cite each authoritative source's project-relative path and its role concisely in MAQUETTE.md. Avoid copying whole sources. Reruns still require agreement before changing existing memory.
+
 ## 2. Study it
 
 Look at every render and read the stories' text before you write a word. Work out, the way a designer reading the pages would:
@@ -34,11 +42,11 @@ If you can't see the renders (the model has no vision), work from the styles, sw
 
 ## 3. Ask one round of questions
 
-Ask two or three questions, together in one message, only about what the pages can't answer:
+Ask only unresolved questions, at most two or three together, using both the pages and the brief/guides already read. Omit questions already answered by those sources; if nothing remains unclear, do not manufacture questions:
 
 1. What the document is for and who reads it, if the pages leave it open.
 2. What you may change: text, charts, images, layout, or only some of these.
-3. Whether a house style or brand guide exists that this file should defer to.
+3. Whether a house style or brand guide exists, only if the selected files and memory have not already answered it.
 
 Add the which-document or which-working-file question here if step 1 needed it. Don't ask about mechanics you can look up. Then stop and wait for the answers.
 
@@ -59,6 +67,8 @@ Working file: <name>.designcraft
 ### Grid and rhythm
 ### Imagery
 ## Conventions
+## Authoritative sources
+- `<relative/path>` — role and concise evidence
 ## Decisions
 ### Stated
 - <what the person told you, dated YYYY-MM-DD>

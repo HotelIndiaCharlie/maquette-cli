@@ -130,7 +130,7 @@ test("view_image sends the real type of a JPEG named .png, and refuses what isn'
 test("reads, glob, grep and view_image run without asking; writes, edits, bash and open_file are changes", () => {
   const { m } = project();
   const kinds = Object.fromEntries(m.tools.map((t) => [t.name, classify(t)]));
-  assert.deepEqual(kinds, { bash: "change", read_file: "read", write_file: "change", edit_file: "change", glob: "read", grep: "read", view_image: "read", open_file: "change" });
+  assert.deepEqual(kinds, { tree: "read", bash: "change", read_file: "read", write_file: "change", edit_file: "change", glob: "read", grep: "read", view_image: "read", open_file: "change" });
 });
 
 test("globRegex: ** crosses folders, * and ? don't, {a,b} is either", () => {

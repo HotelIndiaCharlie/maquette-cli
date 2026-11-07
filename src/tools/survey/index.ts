@@ -2,6 +2,7 @@
 // open document, reads every story's text, lists styles, swatches and fonts, names the labelled
 // frames page by page and renders the pages small, so the model can study the design without
 // thirty calls. With nothing open, it lists the documents in the folder instead.
+import { folderMap } from "../workspace/tree.ts";
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InspectItem, ToolContent } from "../../designcraft.ts";
@@ -111,12 +112,13 @@ const survey: ToolFactory = ({ dc, root, warnings }) => {
     const maxPages = typeof args.pages === "number" && args.pages >= 0 ? Math.floor(args.pages) : 24;
     const textLimit = typeof args.text === "number" && args.text >= 0 ? Math.floor(args.text) : 12000;
 
+    const folder = await folderMap(root);
     let doc: Survey;
     try {
       doc = await dc.json<Survey>("inspect_document");
     } catch {
       const found = documentsIn(root);
-      return { content: [text(found.length ? `No document is open. Documents in this folder:\n${found.map((f) => `  ${f}`).join("\n")}\nOpen one with open_document, then call document_survey again.` : "No document is open, and there's no .designcraft, .idml, .indd or .indt file in this folder or the one below it.")] };
+      return { content: [text(found.length ? `No document is open. Documents in this folder:\n${found.map((f) => `  ${f}`).join("\n")}\nOpen one with open_document, then call document_survey again.` : "No document is open, and there's no .designcraft, .idml, .indd or .indt file in this folder or the one below it."), text(JSON.stringify({ folder }))] };
     }
 
     const facts = await readFacts(dc, root);
@@ -169,6 +171,7 @@ const survey: ToolFactory = ({ dc, root, warnings }) => {
 
     const recorded = warnings();
     const summary = {
+      folder,
       title: doc.title,
       path: doc.path,
       pages: count,
