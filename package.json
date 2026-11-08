@@ -24,7 +24,8 @@
     "smoke": "node test/smoke.ts",
     "test:foundations:live": "node test/foundations-live.ts",
     "test:chart-safety:live": "node test/chart-safety-live.ts",
-    "test:package": "node test/package-install.ts"
+    "test:package": "node test/package-install.ts",
+    "hooks": "git config core.hooksPath .githooks"
   },
   "engines": {
     "node": ">=24"

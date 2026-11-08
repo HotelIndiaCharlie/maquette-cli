@@ -24,9 +24,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run smoke
-      # dist/ is committed so installing from GitHub needs no build; it must match src/.
-      - name: dist/ matches src/
+      # dist/ is rebuilt and committed on main by dist.yml; here the build only has to work.
+      - name: Build
         if: runner.os == 'Linux'
-        run: |
-          npm run build
-          git diff --exit-code --stat -- dist || { echo "::error::dist/ is out of date: run npm run build and commit dist/"; exit 1; }
+        run: npm run build

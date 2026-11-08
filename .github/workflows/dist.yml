@@ -1,0 +1,42 @@
+# dist/ is committed so installing from GitHub needs no build, but only on main: branches leave it
+# out (AGENTS.md, "Git workflow"). After every push to main this rebuilds it and commits any change.
+# A commit pushed with GITHUB_TOKEN starts no other workflow, so this can't loop.
+name: Build dist
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One build at a time; a newer push to main replaces a waiting one.
+concurrency:
+  group: build-dist
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Commit dist/ if it changed
+        run: |
+          git add -A dist
+          if git diff --cached --quiet -- dist; then
+            echo "dist/ is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Build dist from ${GITHUB_SHA::7}"
+          git push origin HEAD:main
