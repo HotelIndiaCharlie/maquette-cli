@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-export type McpConfig = { type?: "stdio" | "http" | "sse"; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; disabled?: boolean; trustedReadOnly?: boolean; timeoutSeconds?: number };
-export type McpEntry = { name: string; config?: McpConfig; source: "user" | "project"; error?: string };
+export type McpConfig = { type?: "stdio" | "http" | "sse"; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; inheritEnv?: boolean; disabled?: boolean; trustedReadOnly?: boolean; timeoutSeconds?: number };
+export type McpEntry = { name: string; config?: McpConfig; source: "user" | "project"; path?: string; error?: string };
 export type McpConfiguration = { entries: McpEntry[]; projectHash: string; root: string; home: string; warnings: string[] };
 const object = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 export function validateMcpMap(value: unknown): Record<string, McpConfig> {
@@ -13,15 +13,15 @@ export function validateMcpMap(value: unknown): Record<string, McpConfig> {
   for (const [name, v] of Object.entries(value)) {
     if (!name || name.length > 128 || !object(v)) throw new Error("Each MCP server needs a name and an object configuration.");
     const bad = (why: string) => new Error(`MCP server ${JSON.stringify(name)}: ${why}. Values are hidden.`);
-    for (const key of Object.keys(v)) if (!["type", "command", "args", "env", "url", "headers", "disabled", "trustedReadOnly", "timeoutSeconds"].includes(key)) throw bad("unknown configuration field");
-    for (const key of ["disabled", "trustedReadOnly"]) if (v[key] !== undefined && typeof v[key] !== "boolean") throw bad(`${key} must be boolean`);
+    for (const key of Object.keys(v)) if (!["type", "command", "args", "env", "url", "headers", "disabled", "trustedReadOnly", "timeoutSeconds", "inheritEnv"].includes(key)) throw bad("unknown configuration field");
+    for (const key of ["disabled", "trustedReadOnly", "inheritEnv"]) if (v[key] !== undefined && typeof v[key] !== "boolean") throw bad(`${key} must be boolean`);
     if (v.disabled === true) { out[name] = { disabled: true }; continue; }
     const type = v.type ?? (v.command ? "stdio" : "http");
     if (!["stdio", "http", "sse"].includes(String(type))) throw bad("type must be stdio, http or sse");
     if (type === "stdio") {
       if (typeof v.command !== "string" || !v.command.trim() || v.url !== undefined || v.headers !== undefined) throw bad("stdio needs command and cannot have url/headers");
     } else {
-      if (typeof v.url !== "string" || v.command !== undefined || v.args !== undefined || v.env !== undefined) throw bad("HTTP/SSE needs url and cannot have command/args/env");
+      if (typeof v.url !== "string" || v.command !== undefined || v.args !== undefined || v.env !== undefined || v.inheritEnv !== undefined) throw bad("HTTP/SSE needs url and cannot have command/args/env");
       try { const u = new URL(v.url); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) throw new Error(); } catch { throw bad("url must be HTTP(S), without embedded credentials"); }
     }
     if (v.args !== undefined && (!Array.isArray(v.args) || !v.args.every(a => typeof a === "string"))) throw bad("args must be strings");
@@ -46,11 +46,18 @@ export function loadMcpConfig(root: string, home = homedir()): McpConfiguration 
     if (source === "project") project.push(json.mcpServers);
     if (!object(json.mcpServers)) { warnings.push(`mcpServers in ${path} must be an object.`); continue; }
     for (const [name, value] of Object.entries(json.mcpServers)) {
-      try { entries.set(name, { name, source, config: validateMcpMap({ [name]: value })[name] }); }
-      catch (e) { entries.set(name, { name, source, error: (e as Error).message }); }
+      try { entries.set(name, { name, source, path, config: validateMcpMap({ [name]: value })[name] }); }
+      catch (e) { entries.set(name, { name, source, path, error: (e as Error).message }); }
     }
   }
-  return { entries: [...entries.values()], projectHash: hash(stable(project)), root, home, warnings };
+  // Project-relative executables are part of the trust decision, including a
+  // symlink's resolved contents. PATH commands still trust the configured path.
+  const executables = [...entries.values()].filter(e => e.source === "project" && e.config?.command?.startsWith(".")).map(e => {
+    const path = resolve(root, e.config!.command!);
+    try { return [e.name, createHash("sha256").update(readFileSync(path)).digest("hex")]; }
+    catch { return [e.name, "unavailable executable"]; }
+  });
+  return { entries: [...entries.values()], projectHash: hash(stable([project, executables])), root, home, warnings };
 }
 const trustFile = (c: McpConfiguration) => join(c.home, ".maquette", "mcp-trust", `${hash(c.root)}.json`);
 export function isTrusted(c: McpConfiguration): boolean {

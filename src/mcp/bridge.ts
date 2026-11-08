@@ -15,14 +15,24 @@ export async function serveBridge(runtime: ServerHandle, version: string) {
   });
   await bridge.connect(new StdioServerTransport());
   let revision = runtime.revision;
-  const timer = setInterval(() => void runtime.refresh().then(async () => {
+  const timer = setInterval(() => void fetch(`http://127.0.0.1:${runtime.port}/revision`, { signal: AbortSignal.timeout(1500) }).then(r => r.json()).then(async current => {
+    if (current.runtimeId === runtime.identity.runtimeId && current.revision === revision) return;
+    await runtime.refresh();
     if (revision !== runtime.revision) { revision = runtime.revision; await bridge.sendToolListChanged(); }
   }).catch(() => {}), 1000);
   timer.unref();
   const off = runtime.on(e => { if (e.type === "catalogue") void bridge.sendToolListChanged().catch(() => {}); });
   let closed = false;
-  const close = async () => { if (closed) return; closed = true; clearInterval(timer); off(); await bridge.close(); await runtime.stop(); };
+  const close = async () => {
+    if (closed) return; closed = true; clearInterval(timer); off();
+    process.stdin.off("end", onEnd); process.stdin.off("close", onEnd);
+    process.off("SIGINT", onEnd); process.off("SIGTERM", onEnd);
+    try { await bridge.close(); } finally { await runtime.stop(); }
+  };
+  const onEnd = () => void close();
+  process.stdin.once("end", onEnd); process.stdin.once("close", onEnd);
   bridge.onclose = () => void close();
-  process.once("SIGINT", () => void close()); process.once("SIGTERM", () => void close());
+  process.once("SIGINT", onEnd); process.once("SIGTERM", onEnd);
+  if (process.stdin.readableEnded) void close();
   return { close };
 }

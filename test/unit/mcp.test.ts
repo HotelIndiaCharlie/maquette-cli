@@ -99,7 +99,7 @@ test("concurrent startup attaches once, refuses another root and non-runtime lis
   await assert.rejects(() => discover(temp(), port, "0.1.0"), /another project/);
   const guest = a.owned ? b : a; await guest.server.stop(); assert.ok(await discover(root, port, "0.1.0"));
   const ordinary = createServer((req, res) => res.end("hello")); await new Promise<void>(r => ordinary.listen(0, "127.0.0.1", r));
-  t.after(() => ordinary.close()); await assert.rejects(() => discover(root, (ordinary.address() as any).port, "0.1.0"), /non-Maquette/);
+  t.after(() => ordinary.close()); await assert.rejects(() => discover(temp(), (ordinary.address() as any).port, "0.1.0"), /non-Maquette/);
 });
 
 test("external SDK MCP client shares the HTTP runtime and owns only a runtime it starts", async t => {
@@ -131,4 +131,71 @@ test("two simultaneous stdio facades launch one owned runtime, attached disconne
   await clients[owner].close();
   for (let i = 0; i < 100 && await discover(root, port, "0.1.0"); i++) await new Promise(r => setTimeout(r, 10));
   assert.equal(await discover(root, port, "0.1.0"), undefined);
+});
+
+test("one canonical root cannot start an engine on a second port", async t => {
+  const root = temp(), home = temp(), port = await closedPort();
+  const runtime = await startServer({ root, home, engine, port, version: "0.1.0" }); t.after(() => runtime.stop());
+  const other = await closedPort(); let launches = 0;
+  await assert.rejects(() => ensureRuntime({ root, home, port: other, version: "0.1.0" }, async () => { launches++; return { engine }; }), new RegExp(`port ${port}`));
+  assert.equal(launches, 0);
+  await assert.rejects(() => startServer({ root, home, engine, port: other, version: "0.1.0" }), /Already owned/);
+  assert.equal((await discover(root, port, "0.1.0"))!.runtimeId, runtime.identity.runtimeId);
+});
+
+test("stdio uses the SDK safe environment unless inheritance is explicitly enabled; RPC errors are definite and stderr stays local", async t => {
+  const root = temp(), home = temp();
+  const previous = process.env.ANTHROPIC_API_KEY; process.env.ANTHROPIC_API_KEY = "fixture-secret-never-print";
+  t.after(() => { if (previous === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previous; });
+  put(root, ".mcp.json", { mcpServers: { local: { command: process.execPath, args: [fixture], env: { FIXTURE_EXPLICIT: "configured" } } } }); trustProject(loadMcpConfig(root, home));
+  const runtime = await startServer({ root, home, engine, port: await closedPort(), version: "0.1.0" }); t.after(() => runtime.stop());
+  const r = await runtime.enqueue("local__read_echo", { environment: true }, "http");
+  assert.deepEqual(JSON.parse(r.text), { providerKeyPresent: false, explicit: "configured" });
+  const error = await runtime.enqueue("local__read_echo", { rpcError: true }, "http");
+  assert.equal(error.ok, false); assert.match(error.text, /bad arguments from fixture/); assert.doesNotMatch(error.text, /uncertain/);
+  await runtime.enqueue("local__read_echo", { diagnostic: true }, "http");
+  for (let i = 0; i < 50 && !(await runtime.mcpLogs("local")).includes("UI only"); i++) await new Promise(r => setTimeout(r, 10));
+  assert.match(await runtime.mcpLogs("local"), /Fixture stderr diagnostic/);
+  put(root, ".mcp.json", { mcpServers: { local: { command: process.execPath, args: [fixture], inheritEnv: true } } }); trustProject(loadMcpConfig(root, home)); await runtime.reconnect("local");
+  const inherited = await runtime.enqueue("local__read_echo", { environment: true }, "http"); assert.equal(JSON.parse(inherited.text).providerKeyPresent, true);
+});
+
+test("project-relative command contents invalidate trust", () => {
+  const root = temp(), home = temp();
+  writeFileSync(join(root, "mcp.sh"), "first version");
+  put(root, ".mcp.json", { mcpServers: { local: { command: "./mcp.sh" } } });
+  trustProject(loadMcpConfig(root, home)); assert.equal(isTrusted(loadMcpConfig(root, home)), true);
+  writeFileSync(join(root, "mcp.sh"), "second version"); assert.equal(isTrusted(loadMcpConfig(root, home)), false);
+});
+
+test("EOF on an owning bridge stops its runtime and engine child", async t => {
+  const { spawn } = await import("node:child_process"); const { existsSync, readFileSync } = await import("node:fs");
+  const root = temp(), home = temp(), port = await closedPort();
+  const pidfile = join(root, "engine.pid"), wrapper = join(root, "engine.ts");
+  writeFileSync(wrapper, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(pidfile)}, String(process.pid)); await import(${JSON.stringify(new URL("../stub-engine.ts", import.meta.url).href)});`);
+  const child = spawn(process.execPath, [cli, "mcp", "--port", String(port)], { cwd: root, env: { ...process.env, HOME: home, MAQUETTE_ENGINE: wrapper }, stdio: ["pipe", "pipe", "pipe"] });
+  let stderr = ""; child.stderr.on("data", d => stderr += d); child.stdout.resume();
+  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  const closed = new Promise(resolve => child.once("close", resolve));
+  for (let i = 0; i < 200 && (!existsSync(pidfile) || !await discover(root, port, "0.1.0")); i++) await new Promise(r => setTimeout(r, 25));
+  assert.ok(existsSync(pidfile), stderr); const pid = Number(readFileSync(pidfile, "utf8"));
+  child.stdin.end();
+  const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+  try { assert.equal(await closed, 0, stderr); } finally { clearTimeout(timer); }
+  assert.throws(() => process.kill(pid, 0), (e: any) => e.code === "ESRCH");
+  assert.equal(await discover(root, port, "0.1.0"), undefined);
+});
+
+test("a newly published built-in evicts all tools from a colliding external server", async t => {
+  const { ToolRegistry } = await import("../../src/mcp/registry.ts");
+  const root = temp(), home = temp();
+  put(root, ".mcp.json", { mcpServers: { local: { command: process.execPath, args: [fixture] } } }); trustProject(loadMcpConfig(root, home));
+  let builtinTools: any[] = [{ name: "inspect_document", inputSchema: { type: "object" } }];
+  const builtin = { async listTools() { return { tools: builtinTools }; }, setNotificationHandler() {} };
+  const registry = new ToolRegistry(root, "0.1.0", builtin as any, () => {}, home); t.after(() => registry.close()); await registry.start();
+  assert.ok(registry.byName.has("local__read_echo"));
+  const colliding = exposedName("local", "odd.name"); builtinTools = [...builtinTools, { name: colliding, inputSchema: { type: "object" } }];
+  await registry.refreshBuiltin();
+  assert.equal(registry.byName.get(colliding)!._maquette!.builtin, true); assert.equal(registry.byName.has("local__read_echo"), false);
+  assert.equal(registry.statuses.get("local")!.state, "failed"); assert.match(registry.statuses.get("local")!.message!, /built-in tools take precedence/);
 });

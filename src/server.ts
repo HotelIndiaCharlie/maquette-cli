@@ -6,19 +6,20 @@ import { createServer, type Server } from "node:http";
 import { extname, join } from "node:path";
 import { text as readAll } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
-import { randomUUID, createHash } from "node:crypto";
-import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { projectInstructions } from "./agent/prompt.ts";
 import { stamp, type Tool } from "./args.ts";
 import { ToolRegistry, type McpStatus } from "./mcp/registry.ts";
+import { runtimeLockPath, publishPort } from "./runtime/ownership.ts";
+import { toolScope, clearsInspection } from "./tools/scope.ts";
 import { acquireLock } from "./runtime/lock.ts";
 
-export const runtimeProtocol = "maquette-runtime-v1";
+export const runtimeProtocol = "maquette-runtime-v2";
 export type Source = "prompt" | "model" | "http" | "mcp";
-export type CallOptions = { caller?: string; identity?: string; cursor?: ChangeCursor };
+export type CallOptions = { caller?: string; identity?: string; cursor?: ChangeCursor; deadline?: number };
 export type Reply = { id: number; tool: string; ok: boolean; text: string; images: string[]; source: Source; ms: number; result?: CallToolResult; caller?: string };
 export type RuntimeIdentity = { protocol: string; version: string; root: string; runtimeId: string; ownerPid: number };
 const extensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
@@ -30,7 +31,8 @@ export type ServerEvent =
 export type ServerHandle = {
   root: string; port: number; tools: Tool[]; byName: Map<string, Tool>; instructions: string; images: string;
   identity: RuntimeIdentity; revision: number; changeSequence: number;
-  changes(cursor?: ChangeCursor): Promise<ChangeFeed>;
+  changes(cursor?: ChangeCursor, caller?: string): Promise<ChangeFeed>;
+  mcpLogs(name: string): Promise<string>;
   lastImage(): string | undefined;
   enqueue(tool: string, args: Record<string, unknown>, source: Source, options?: CallOptions): Promise<Reply>;
   mcpStatus(): Promise<McpStatus[]>;
@@ -39,11 +41,12 @@ export type ServerHandle = {
   on(listener: (event: ServerEvent) => void): () => void;
   stop(): Promise<void>;
 };
+export class PortInUseError extends Error { code = "PORT_IN_USE"; }
 export type ServerOptions = { port: number; version: string; root?: string; cli?: string; engine?: string; home?: string };
 
 export async function startServer(options: ServerOptions): Promise<ServerHandle> {
   const root = realpathSync(options.root ?? process.cwd());
-  const release = acquireLock(join(tmpdir(), `maquette-runtime-${process.getuid?.() ?? "user"}-${createHash("sha256").update(`${root}:${options.port}`).digest("hex")}.lock`));
+  const release = acquireLock(runtimeLockPath(root), { port: options.port });
   const client = new Client({ name: "maquette", version: options.version });
   const engine = options.engine ?? fileURLToPath(new URL(`./engine${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
   const args = options.engine ? [engine] : [engine, "--designcraft", options.cli!, "--root", root];
@@ -69,9 +72,10 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
       const reply: Reply = { id, tool, ok: false, text: "", images: [], source, ms: 0, caller: options.caller ?? source };
       const definition = live.byName.get(tool);
       try {
-        const before = changes.since(options.cursor);
-        const stale = options.cursor && (before.gap || before.changes.some(e => e.caller !== options.caller));
-        const r = definition && classify(definition) !== "read" && stale
+        const before = changes.since(options.cursor, options.caller);
+        const stale = options.cursor && (before.gap || before.changes.some(e => !e.own));
+        const expired = options.deadline !== undefined && Date.now() >= options.deadline;
+        const r = expired ? { content: [{ type: "text" as const, text: "Call expired while queued; it was not executed." }], isError: true } : definition && toolScope(definition) === "designcraft" && !clearsInspection(tool) && classify(definition) !== "read" && stale
           ? { content: [{ type: "text" as const, text: "Another caller changed shared state after this model step began. Inspect current state before editing; this call was not run." }], isError: true }
           : await live.call(tool, args, options.identity);
         reply.result = r;
@@ -90,7 +94,7 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         reply.ok = !r.isError; reply.text = texts.join("\n");
       } catch (e) { reply.text = e instanceof Error ? e.message : String(e); }
       if (reply.ok && definition && classify(definition) === "change") {
-        const scope = definition._maquette && !definition._maquette.builtin ? "external" : /^(bash|write_file|edit_file|open_file|memory_write|memory_add)$/.test(tool) ? "workspace" : "designcraft";
+        const scope = toolScope(definition);
         changes.append({ caller: reply.caller!, tool, source, scope, server: definition._maquette?.server });
       }
       reply.ms = Date.now() - t0;
@@ -102,6 +106,7 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
       queue = reply.catch(() => {}); return reply;
     }
     let actualPort = options.port;
+    const sessions = new Map<string, { caller: string; source: Source }>();
     server = createServer(async (req, res) => {
       const send = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
       try {
@@ -110,19 +115,29 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         const claimedRoot = req.headers["x-maquette-root"] ?? url.searchParams.get("root");
         if (claimedRoot && claimedRoot !== root) return send(409, { ok: false, text: "Runtime belongs to another project root." });
         if (req.method === "GET" && url.pathname === "/identity") return send(200, identity);
+        const token = typeof req.headers["x-maquette-session"] === "string" ? req.headers["x-maquette-session"] : "";
+        const session = sessions.get(token);
+        if (req.method === "GET" && url.pathname === "/revision") return send(200, { ...identity, revision: live.revision });
         if (req.method === "GET" && url.pathname === "/tools") return send(200, { ...identity, revision: live.revision, changeSequence: changes.sequence, root, instructions, project: projectInstructions(root) ?? null, tools: live.tools });
         if (req.method === "GET" && url.pathname === "/changes") {
           if (claimedRoot !== root) return send(409, { ok: false, text: "Changes require the canonical project root." });
           const runtime = url.searchParams.get("runtime"); const after = Number(url.searchParams.get("after") ?? 0);
           if (!Number.isSafeInteger(after) || after < 0) return send(400, { ok: false, text: "after must be a non-negative integer cursor." });
-          return send(200, changes.since(runtime ? { runtime, after } : undefined));
+          return send(200, changes.since(runtime ? { runtime, after } : undefined, session?.caller));
         }
         if (req.method === "GET" && url.pathname === "/mcp") return send(200, { servers: [...live.statuses.values()] });
-        if (req.method !== "POST" || !["/call", "/mcp/reconnect"].includes(url.pathname)) return send(404, { ok: false, text: "POST /call {tool, arguments}, or GET /tools." });
+        if (req.method === "GET" && url.pathname === "/mcp/logs") return send(200, { text: live.logs(url.searchParams.get("name") ?? "") });
+        if (req.method !== "POST" || !["/call", "/session", "/mcp/reconnect"].includes(url.pathname)) return send(404, { ok: false, text: "POST /call {tool, arguments}, or GET /tools." });
         if (!req.headers["content-type"]?.startsWith("application/json")) return send(415, { ok: false, text: "Send the call as application/json." });
         let body;
         try { body = JSON.parse(await readAll(req)); } catch { return send(400, { ok: false, text: "The body isn't JSON." }); }
         if (!body || typeof body !== "object" || Array.isArray(body)) return send(400, { ok: false, text: "The body must be an object." });
+        if (url.pathname === "/session") {
+          if (claimedRoot !== root) return send(409, { ok: false, text: "Session requires canonical project root." });
+          const token = randomUUID();
+          sessions.set(token, { caller: `${body.channel === "mcp" ? "mcp" : "terminal"}:${randomUUID()}`, source: body.channel === "mcp" ? "mcp" : "http" });
+          return send(200, { token });
+        }
         if (url.pathname === "/mcp/reconnect") {
           if (typeof body.name !== "string") return send(400, { ok: false, text: "name must be a server name." });
           await live.reconnect(body.name); return send(200, { ok: true });
@@ -130,16 +145,17 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
         const { tool, arguments: args = {} } = body;
         if (typeof tool !== "string" || !live.byName.has(tool)) return send(400, { ok: false, text: `No tool named ${JSON.stringify(tool)}; GET /tools lists them.` });
         if (typeof args !== "object" || args === null || Array.isArray(args)) return send(400, { ok: false, text: "arguments must be a JSON object." });
-        return send(200, await enqueue(tool, args, body.source === "mcp" ? "mcp" : "http", { caller: typeof body.caller === "string" ? body.caller.slice(0, 128) : "http", identity: typeof body.identity === "string" ? body.identity : undefined, cursor: body.cursor && typeof body.cursor.runtime === "string" && Number.isSafeInteger(body.cursor.after) && body.cursor.after >= 0 ? body.cursor : undefined }));
+        return send(200, await enqueue(tool, args, session?.source ?? "http", { caller: session?.caller ?? `http:${randomUUID()}`, deadline: typeof body.deadline === "number" && Number.isFinite(body.deadline) ? Math.min(body.deadline, Date.now() + 600_000) : Date.now() + 600_000, identity: typeof body.identity === "string" ? body.identity : undefined, cursor: body.cursor && typeof body.cursor.runtime === "string" && Number.isSafeInteger(body.cursor.after) && body.cursor.after >= 0 ? body.cursor : undefined }));
       } catch { if (!res.headersSent) send(500, { ok: false, text: "Runtime request failed; inspect state before retrying a call." }); }
     });
     client.onclose = () => { if (!stopping) emit({ type: "engine_closed" }); };
     await new Promise<void>((done, failed) => {
-      server!.once("error", (e: NodeJS.ErrnoException) => failed(new Error(e.code === "EADDRINUSE" ? `Port ${options.port} is in use by another program. Pick another port with --port.` : e.message)));
+      server!.once("error", (e: NodeJS.ErrnoException) => failed(e.code === "EADDRINUSE" ? new PortInUseError(`Port ${options.port} is in use by another program. Pick another port with --port.`) : e));
       server!.listen(options.port, "127.0.0.1", done);
     });
     actualPort = (server.address() as import("node:net").AddressInfo).port;
-    return { root, port: actualPort, identity, get changeSequence() { return changes.sequence; }, changes: async cursor => changes.since(cursor), get revision() { return live.revision; }, get tools() { return live.tools; }, get byName() { return live.byName; }, instructions, images,
+    publishPort(root, actualPort);
+    return { root, port: actualPort, identity, get changeSequence() { return changes.sequence; }, changes: async (cursor, caller) => changes.since(cursor, caller), mcpLogs: async name => live.logs(name), get revision() { return live.revision; }, get tools() { return live.tools; }, get byName() { return live.byName; }, instructions, images,
       lastImage: () => lastImage, enqueue, mcpStatus: async () => [...live.statuses.values()], reconnect: name => live.reconnect(name), refresh: async () => {},
       on(listener) { listeners.add(listener); return () => void listeners.delete(listener); },
       async stop() { if (stopping) return; stopping = true; server!.close(); server!.closeAllConnections(); await queue; await live.close(); await client.close(); release(); },

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { ToolListChangedNotificationSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ErrorCode, ToolListChangedNotificationSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "../args.ts";
 import { expandCredentials, isTrusted, loadMcpConfig, type McpEntry } from "./config.ts";
 
@@ -34,6 +34,8 @@ export class ToolRegistry {
   owners = new Map<string, Owner>();
   revision = 0;
   statuses = new Map<string, McpStatus>();
+  #logs = new Map<string, string>();
+  logs(name: string): string { return this.#logs.get(name) || "No stderr captured for this server."; }
   #root: string;
   #home?: string;
   #version: string;
@@ -66,9 +68,15 @@ export class ToolRegistry {
     if (this.#closing) return;
     const tools: Tool[] = this.#builtins.map(t => ({ ...t, _maquette: { server: "builtin", identity: `${this.#builtinGeneration}:${t.name}`, builtin: true } }));
     const owners = new Map<string, Owner>(this.#builtins.map(t => [t.name, { identity: `${this.#builtinGeneration}:${t.name}`, client: this.#builtin, original: t.name, timeout: 600_000 }]));
+    // A new built-in evicts an entire colliding external connection before
+    // retaining any of its tools, regardless of their catalogue order.
+    for (const [name, owner] of this.owners) if (owner.server && owners.has(name) && this.#clients.get(owner.server) === owner.client) {
+      const status = this.statuses.get(owner.server);
+      if (status) { status.state = "failed"; status.tools = 0; status.message = `Tool name collision: ${name}; built-in tools take precedence. Reconnect after fixing the server.`; }
+      this.#clients.delete(owner.server); this.track(owner.client.close());
+    }
     // Keep other connections exactly; replacing one changes only its identities.
     for (const [name, owner] of this.owners) if (owner.server && owner.server !== external?.name && this.#clients.get(owner.server) === owner.client) {
-      if (owners.has(name)) throw new Error(`Tool name collision: ${name}`);
       tools.push(this.byName.get(name)!); owners.set(name, owner);
     }
     if (external) for (const t of external.tools) {
@@ -105,11 +113,15 @@ export class ToolRegistry {
     try {
       const c = expandCredentials(entry.config!);
       client = new Client({ name: "maquette", version: this.#version });
-      const transport = c.type === "stdio" ? new StdioClientTransport({ command: c.command!, args: c.args, env: { ...Object.fromEntries(Object.entries(process.env).filter((x): x is [string, string] => x[1] !== undefined)), ...c.env }, cwd: this.#root, stderr: "pipe" })
+      const transport = c.type === "stdio" ? new StdioClientTransport({ command: c.command!, args: c.args, env: { ...(c.inheritEnv ? Object.fromEntries(Object.entries(process.env).filter((x): x is [string, string] => x[1] !== undefined)) : getDefaultEnvironment()), ...c.env }, cwd: this.#root, stderr: "pipe" })
         : c.type === "sse" ? new SSEClientTransport(new URL(c.url!), { requestInit: { headers: c.headers }, eventSourceInit: { fetch: (url, init) => fetch(url, { ...init, headers: { ...c.headers, ...init?.headers } }) } })
         : new StreamableHTTPClientTransport(new URL(c.url!), { requestInit: { headers: c.headers } });
-      // Server stderr may include credentials; drain it without copying it to traces/UI.
-      if (transport instanceof StdioClientTransport) transport.stderr?.on("data", () => {});
+      // Diagnostics are bounded in memory and only returned by an explicit UI
+      // command. Never add these to model history, the journal or trace events.
+      this.#logs.delete(name);
+      if (transport instanceof StdioClientTransport) transport.stderr?.on("data", (d: Buffer) => {
+        this.#logs.set(name, ((this.#logs.get(name) ?? "") + d.toString()).slice(-65536).split("\n").slice(-200).join("\n"));
+      });
       let timer: ReturnType<typeof setTimeout>;
       const connect = async () => { await client!.connect(transport, { timeout: 10_000 }); return await allTools(client!); };
       const tools = await Promise.race([connect(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Connection deadline exceeded")), 10_000); })]).finally(() => clearTimeout(timer!));
@@ -143,8 +155,10 @@ export class ToolRegistry {
   async call(name: string, args: Record<string, unknown>, expected?: string): Promise<CallToolResult> {
     const owner = this.owners.get(name);
     if (!owner || (expected && expected !== owner.identity)) return { content: [{ type: "text", text: "Tool unavailable or identity changed; refresh the catalogue and permission before calling." }], isError: true };
-    try { return await owner.client.callTool({ name: owner.original, arguments: args }, undefined, { timeout: owner.timeout }) as CallToolResult; }
-    catch { return { content: [{ type: "text", text: "Tool call failed or connection ended. Outcome may be uncertain; inspect state before retrying. Transport details hidden to protect credentials." }], isError: true }; }
+    try { return await owner.client.callTool({ name: owner.original, arguments: args }, undefined, { timeout: owner.timeout, resetTimeoutOnProgress: true, onprogress: () => {}, maxTotalTimeout: 600_000 }) as CallToolResult; }
+    catch (e) {
+      if (e instanceof McpError && e.code !== ErrorCode.ConnectionClosed && e.code !== ErrorCode.RequestTimeout) return { content: [{ type: "text", text: `External MCP server replied with error ${e.code} (untrusted content): ${e.message}` }], isError: true };
+      return { content: [{ type: "text", text: "Tool call failed or connection ended. Outcome may be uncertain; inspect state before retrying. Transport details hidden to protect credentials." }], isError: true }; }
   }
   async close() {
     this.#closing = true;

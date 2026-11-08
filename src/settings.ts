@@ -76,8 +76,8 @@ function flatten(value: unknown, prefix = "", out: Record<string, unknown> = {})
 }
 
 function check(key: string, value: unknown, where: string): unknown {
-  const spec = schema[key];
-  if (key === "mcpServers") { try { return validateMcpMap(value); } catch { throw new SettingsError(`Invalid mcpServers (${where}); check server fields. Values hidden.`); } }
+  const spec = schema[key] ?? (key.startsWith("mcpServers.") && key.length > 11 ? schema.mcpServers : undefined);
+  if (key === "mcpServers" || key.startsWith("mcpServers.")) { try { return key === "mcpServers" ? validateMcpMap(value) : validateMcpMap({ [key.slice(11)]: value })[key.slice(11)]; } catch { throw new SettingsError(`Invalid mcpServers (${where}); check server fields. Values hidden.`); } }
   const bad = (why: string) => new SettingsError(`${key} ${why} (${where}).`);
   if (typeof value !== spec.kind) throw bad(`must be a ${spec.kind}, not ${JSON.stringify(value)}`);
   if (spec.choices && !spec.choices.includes(value as string)) throw bad(`must be one of ${spec.choices.join(", ")}, not "${value}"`);
@@ -91,7 +91,7 @@ function check(key: string, value: unknown, where: string): unknown {
 
 // A value as typed on the command line or in an environment variable, read by its key's type.
 export function parse(key: string, raw: string, where = "command line"): unknown {
-  const spec = schema[key];
+  const spec = schema[key] ?? (key.startsWith("mcpServers.") && key.length > 11 ? schema.mcpServers : undefined);
   if (!spec) throw new SettingsError(`There's no setting "${key}". \`maquette config\` lists them.`);
   if (spec.kind === "object") {
     try { return check(key, JSON.parse(raw), where); } catch { throw new SettingsError(`Invalid ${key} JSON configuration (${where}); values hidden.`); }
@@ -169,6 +169,9 @@ export function load(where: Where = {}): Loaded {
   }
   const mcp = loadMcpConfig(where.cwd ?? process.cwd(), where.home);
   settings.mcpServers = Object.fromEntries(mcp.entries.filter(e => e.config).map(e => [e.name, e.config]));
+  for (const entry of mcp.entries) origins.set(`mcpServers.${entry.name}`, { source: entry.source, path: entry.path });
+  const mcpOrigin = mcp.entries.find(e => e.source === "project") ?? mcp.entries[0];
+  if (mcpOrigin) origins.set("mcpServers", { source: mcpOrigin.source, path: mcpOrigin.path });
   warnings.push(...mcp.warnings, ...mcp.entries.filter(e => e.error).map(e => e.error!));
   return { settings: settings as Settings, origins, files: paths, warnings };
 }
@@ -176,9 +179,9 @@ export function load(where: Where = {}): Loaded {
 // Writes one key into a settings file, or removes it when value is undefined, keeping the
 // file's other keys. Returns false when there was nothing to remove.
 export function write(path: string, key: string, value: unknown): boolean {
-  if (!schema[key]) throw new SettingsError(`There's no setting "${key}". \`maquette config\` lists them.`);
+  if (!schema[key] && !(key.startsWith("mcpServers.") && key.length > 11)) throw new SettingsError(`There's no setting "${key}". \`maquette config\` lists them.`);
   const json = readFile(path);
-  const parts = key.split(".");
+  const parts = key.startsWith("mcpServers.") ? ["mcpServers", key.slice(11)] : key.split(".");
   const chain: Record<string, unknown>[] = [json];
   for (const k of parts.slice(0, -1)) {
     const next = chain.at(-1)![k];
@@ -194,7 +197,7 @@ export function write(path: string, key: string, value: unknown): boolean {
     delete chain.at(-1)![last];
     // Drop the objects left empty, innermost first.
     for (let i = chain.length - 1; i > 0 && !Object.keys(chain[i]).length; i--) delete chain[i - 1][parts[i - 1]];
-  } else chain.at(-1)![last] = value;
+  } else Object.defineProperty(chain.at(-1)!, last, { value, enumerable: true, configurable: true, writable: true });
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`);
   return true;

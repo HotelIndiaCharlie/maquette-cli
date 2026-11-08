@@ -327,8 +327,8 @@ function config(args: string[]) {
     const o = loaded.origins.get(k);
     return !o ? "" : o.source === "env" ? `env ${o.path}` : o.source === "flag" ? `--${k}` : o.source === "default" ? "default" : `${o.source} ${shortPath(o.path!)}`;
   };
-  const value = (k: string) => k.split(".").reduce<any>((v, part) => v?.[part], settings);
-  const known = (k: string | undefined) => (k && schema[k] ? k : fail(k ? `There's no setting "${k}". \`maquette config keys\` describes them.` : "Which setting? `maquette config keys` describes them."));
+  const value = (k: string) => k.startsWith("mcpServers.") ? settings.mcpServers[k.slice(11)] : k.split(".").reduce<any>((v, part) => v?.[part], settings);
+  const known = (k: string | undefined) => (k && (schema[k] || (k.startsWith("mcpServers.") && k.length > 11)) ? k : fail(k ? `There's no setting "${k}". \`maquette config keys\` describes them.` : "Which setting? `maquette config keys` describes them."));
   try {
     if (action === "list") {
       const keys = Object.keys(schema);
@@ -358,13 +358,14 @@ function config(args: string[]) {
         console.log(`${paint(1, k)}  ${paint(2, extra)}\n  ${spec.about}`);
       }
     } else if (action === "get") {
-      const v = key === "mcpServers" ? redactedMcp(settings.mcpServers) : value(known(key));
+      const k = known(key), raw = value(k);
+      const v = k === "mcpServers" ? redactedMcp(settings.mcpServers) : k.startsWith("mcpServers.") ? raw === undefined ? undefined : redactedMcp({ server: raw }).server : raw;
       if (v !== undefined) console.log(typeof v === "string" ? v : JSON.stringify(v));
     } else if (action === "set") {
       if (!words.length) fail(`What value? maquette config set ${known(key)} <value>`);
       const v = parse(known(key), words.join(" "), "maquette config set");
       write(file, key!, v);
-      console.log(`Set ${key} to ${JSON.stringify(key === "mcpServers" ? redactedMcp(v as any) : v)} in ${shortPath(file)}.`);
+      console.log(`Set ${key} to ${JSON.stringify(key?.startsWith("mcpServers") ? redactedMcp(key === "mcpServers" ? v as any : { server: v as any }) : v)} in ${shortPath(file)}.`);
       const now = load({ lenient: true }).origins.get(key!);
       if (now && now.source !== scope) console.log(paint(33, `It doesn't take effect here: ${now.source === "env" ? `the environment variable ${now.path}` : `${shortPath(now.path!)}`} overrides it.`));
       if (key === "provider" && v === "openai-compatible" && !settings.model) console.log(`Now pick a model: \`maquette models\` lists what the server offers, then \`maquette config set model <id>\`.`);
@@ -451,9 +452,11 @@ for (const warning of loaded.warnings) console.error(paint(33, warning));
 if (wantsVersion) console.log(`maquette ${version} (DesignCraft CLI ${pin.version} pinned)`);
 else if (wantsHelp || command === "help") console.log(usage);
 else if (!command || command === "serve") await serve();
-else if (command === "skills") console.log(formatSkills(process.cwd(), rest[0]));
+else if (command === "skills") {
+  try { console.log(formatSkills(process.cwd(), rest[0])); } catch (e) { fail((e as Error).message); }
+}
 else if (command === "mcp") {
-  const { server } = await ensureRuntime({ port, version }, async () => {
+  const { server } = await ensureRuntime({ port, version, channel: "mcp" }, async () => {
     const engine = process.env.MAQUETTE_ENGINE || undefined;
     const cli = engine ? undefined : findDesignCraft(settings.designcraft) ?? fail("Install DesignCraft first: maquette install-designcraft");
     return { engine, cli };
