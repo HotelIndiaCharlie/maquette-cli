@@ -5,7 +5,7 @@ import { plan, type Plan, type Rect, type Shape } from "./chart.ts";
 import { type ChartSpec, loadRows, SpecError, validate } from "./spec.ts";
 
 export type ChartItem = { key: string; id: number; kind: "text" | Shape["kind"]; bounds: Bounds; fill?: string; stroke?: string; text?: string };
-export type ChartEntry = { chart: string; frame: number; page: number; spread: number; rect: Rect; group: number; spec: ChartSpec; items: ChartItem[]; drawn: string };
+export type ChartEntry = { chart: string; frame: number; page: number; spread: number; rect: Rect; group: number; spec: ChartSpec; items: ChartItem[]; drawn: string; uncertain?: string };
 export type Check = { marks: number; misplaced: string[]; maxErrorPt: number; overset: string[]; outside: string[]; collisions: string[] };
 export type HandChange = { key: string; change: string };
 

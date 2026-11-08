@@ -7,17 +7,19 @@ import chart from "../../src/tools/chart/index.ts";
 import type { ChartEntry } from "../../src/tools/chart/draw.ts";
 import type { ChartSpec } from "../../src/tools/chart/spec.ts";
 const spec: ChartSpec = { mark: "bar", data: { values: [{ x: "A", y: 2 }] }, encoding: { x: { field: "x", type: "nominal" }, y: { field: "y", type: "quantitative" } } };
-function fixture(failure?: string) {
+function fixture(failure?: string, creating = false) {
   let nextId = 100; let phase = 0;
   const original: any = { id: 90, kind: "Group", bounds: [0, 0, 300, 200], children: [{ id: 91, kind: "Rectangle", bounds: [0, 0, 300, 200], fill: "blue" }] };
-  const items: any[] = [original]; const calls: any[] = [];
+  const items: any[] = creating ? [{ id: 1, kind: "Rectangle", bounds: [0, 0, 300, 200] }] : [original]; const calls: any[] = [];
   const all = (): any[] => items.flatMap(i => [i, ...(i.children ?? [])]);
   const dc = {
     async inspect() { if (failure === "lost" && phase > 0) throw new Error("lost"); return structuredClone({ spreads: [{ index: 0, pages: [{ index: 0, bounds: [0, 0, 300, 200] }], items }], stories: [] }); },
     async execute(command: string, p: any = {}) {
       calls.push({ command, params: p });
+      if (command === "object.findByLabel") return { ids: [] };
       if (command === "edit.clear") {
-        if (failure === "cleanup" && !p.ids.includes(90)) throw new Error("cleanup failed");
+        if ((failure === "cleanup" || failure === "finalize-cleanup") && !p.ids.includes(90)) throw new Error("cleanup failed");
+        if (failure === "missing-both" && p.ids.includes(90)) { items.length = 0; throw new Error("commit failed after deletion"); }
         for (let i = items.length - 1; i >= 0; i--) if (p.ids.includes(items[i].id)) items.splice(i, 1);
       }
       if (command === "frame.create" || command === "line.create" || command === "path.create") {
@@ -37,8 +39,8 @@ function fixture(failure?: string) {
       const resolve = (v: any): any => typeof v === "string" && /^\$\d+\./.test(v) ? v.slice(1).split(".").reduce((o: any, k: string) => o[k], results) : Array.isArray(v) ? v.map(resolve) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k,v]) => [k,resolve(v)])) : v;
       for (const c of commands) {
         if ((failure === "draw" || failure === "cleanup" || failure === "lost") && c.command === "style.paragraph.apply") throw new Error("partial draw failed");
-        if (failure === "finalize" && phase === 4) throw new Error("labels failed");
         results.push(await this.execute(c.command, resolve(c.params)));
+        if ((failure === "finalize" || failure === "finalize-cleanup") && c.command === "object.label" && !String(c.params.label).includes(":pending:")) throw new Error("labels failed after applying one label");
       }
       return results;
     },
@@ -47,7 +49,7 @@ function fixture(failure?: string) {
   const root = mkdtempSync(join(tmpdir(), "maquette-chart-safety-"));
   const module = chart({ dc: dc as any, root, readRoots: [root], warnings: () => [] });
   const entry: ChartEntry = { chart: "1", frame: 1, group: 90, spread: 0, page: 0, rect: [0,0,300,200], spec, items: [{ id: 91, key: "bar:A", kind: "rect", bounds: [0,0,300,200], fill: "blue" }], drawn: "then" };
-  module.opened!({ charts: [entry] }); return { module, items, calls, entry, original };
+  module.opened!({ charts: creating ? [] : [entry] }); return { module, items, calls, entry, original };
 }
 test("invalid spec and missing data never clear or draw the existing chart", async () => {
   for (const args of [{ spec: { mark: "area" } }, { data: { url: "missing.csv" } }]) {
@@ -74,4 +76,31 @@ test("successful staged replacement removes original last; preview failure is on
     assert.equal(f.items.length, 1); assert.notEqual(f.items[0].id, 90); assert.deepEqual(f.calls.at(-1), { command: "edit.clear", params: { ids: [90] } });
     assert.equal((f.module.saved!() as any).charts[0].group, f.items[0].id); if (failure) assert.match(r.content[0].text!, /Chart updated; preview unavailable/);
   }
+});
+
+test("create render errors keep a registered chart; preview render errors always remove it", async () => {
+  for (const preview of [false, true]) {
+    const f = fixture("render", true);
+    const r = await f.module.call("chart_create", { frame: "1", spec, preview });
+    assert.match(JSON.stringify(r), /Preview unavailable/);
+    const charts = (f.module.saved!() as any)?.charts ?? [];
+    assert.equal(charts.length, preview ? 0 : 1);
+    assert.equal(f.items.filter(i => i.kind === "Group").length, preview ? 0 : 1);
+  }
+});
+
+test("discarding hand changes requires an explicit boolean override and reports what was lost", async () => {
+  const f = fixture(); f.original.children[0].fill = "red";
+  await assert.rejects(() => f.module.call("chart_update", { chart: "1", discard_hand_changes: "true" }), /discard_hand_changes: true/);
+  const r = await f.module.call("chart_update", { chart: "1", discard_hand_changes: true });
+  assert.match(r.content[0].text!, /Discarded confirmed hand changes/); assert.doesNotMatch(r.content[0].text!, /No hand changes/);
+});
+
+test("failed finalization cleanup names definitive labels and persists uncertainty when both groups disappear", async () => {
+  const cleanup = fixture("finalize-cleanup");
+  await assert.rejects(() => cleanup.module.call("chart_update", { chart: "1" }), /Potentially duplicated definitive labels: firstlight:chart:1/);
+  const missing = fixture("missing-both");
+  await assert.rejects(() => missing.module.call("chart_update", { chart: "1" }), /candidate group .*also absent/);
+  const listed = await missing.module.call("chart_list", {}); assert.match(listed.content[0].text!, /uncertain/);
+  await assert.rejects(() => missing.module.call("chart_update", { chart: "1" }), /outcome is uncertain/);
 });

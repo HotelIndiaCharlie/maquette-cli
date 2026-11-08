@@ -48,9 +48,11 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
 
   async function render(entry: ChartEntry, wanted: unknown): Promise<ToolContent[]> {
     if (wanted === false) return [];
-    const r = await dc.call("render_page", { page: entry.page });
-    if (r.isError) throw new SpecError("Page render failed.");
-    return r.content.filter((c) => c.type === "image");
+    try {
+      const r = await dc.call("render_page", { page: entry.page });
+      if (!r.isError) return r.content.filter(c => c.type === "image");
+    } catch {}
+    return [text("Preview unavailable. Inspect or render the page before further edits.")];
   }
 
   async function create(args: Record<string, unknown>) {
@@ -60,12 +62,14 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
     const { ids } = await dc.execute<{ ids: number[] }>("object.findByLabel", { label: chartLabel(chart) });
     if (ids.length) throw new SpecError(`frame ${args.frame} already holds chart ${chart}; change it with chart_update`);
     const { entry, check } = await drawChart(dc, { chart, frame, spec: args.spec as ChartSpec, root, readRoots });
-    const image = await render(entry, args.render);
     if (args.preview) {
-      await dc.execute("edit.clear", { ids: [entry.group] });
+      let image: ToolContent[];
+      try { image = await render(entry, args.render); }
+      finally { await dc.execute("edit.clear", { ids: [entry.group] }); }
       return { content: [text(`Preview of chart ${chart} for frame ${args.frame} on page ${entry.page + 1}; the chart has been removed again. ${describe(check)} Call chart_create without preview to place it.`), ...image] };
     }
     charts.set(chart, entry);
+    const image = await render(entry, args.render);
     return { content: [text(`Chart ${chart} placed in frame ${args.frame} on page ${entry.page + 1}: ${entry.items.length} items grouped as "Chart ${chart}" (label ${chartLabel(chart)}). ${describe(check)}`), ...image] };
   }
 
@@ -77,10 +81,11 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
       entry = charts.get(String(f.id));
     }
     if (!entry) throw new SpecError(`no chart ${args.chart} in this session; chart_list shows the charts there are`);
+    if (entry.uncertain) throw new SpecError(`Chart ${entry.chart}: ${entry.uncertain} Inspect current state and reload the verified document before updating; do not retry automatically.`);
     const found = handChanges(entry, ins);
     if (!found) throw new SpecError(`chart ${entry.chart}'s group is no longer in the document`);
-    const spec: ChartSpec = { ...entry.spec, ...((args.spec as object) ?? {}), ...(args.data ? { data: args.data as ChartSpec["data"] } : {}) };
-    if (found.changes.length) throw new SpecError(`Chart ${entry.chart} was not changed. Internal hand changes cannot be preserved yet (HOT-66): ${found.changes.map(c => `${c.key}: ${c.change}`).join("; ")}. Keep the original and review these changes before updating.`);
+    const spec: ChartSpec = { ...structuredClone(entry.spec), ...structuredClone((args.spec as object) ?? {}), ...(args.data ? { data: args.data as ChartSpec["data"] } : {}) };
+    if (found.changes.length && args.discard_hand_changes !== true) throw new SpecError(`Chart ${entry.chart} was not changed. Internal hand changes cannot be preserved yet (HOT-66): ${found.changes.map(c => `${c.key}: ${c.change}`).join("; ")}. Show this list to the person and obtain explicit confirmation before passing discard_hand_changes: true to discard them.`);
     const [dx, dy] = found.offset;
     const group = ins.spreads[entry.spread].items.find(i => i.id === entry!.group);
     const rect: ChartEntry["rect"] = [entry.rect[0] + dx, entry.rect[1] + dy, entry.rect[2] + dx, entry.rect[3] + dy];
@@ -99,24 +104,33 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
     } catch (e) {
       let current: Inspect;
       try { current = await dc.inspect(); }
-      catch { throw new SpecError(`Chart update outcome is uncertain; the engine could not be inspected. Do not retry automatically. Inspect the original and any pending group before continuing.`); }
+      catch {
+        entry.uncertain = "Last update outcome is uncertain; the engine could not be inspected.";
+        throw new SpecError(`${entry.uncertain} Do not retry automatically. Inspect the original and any pending group before continuing.`);
+      }
       const currentIds = itemIds(current);
       if (!currentIds.has(entry.group)) {
-        if (candidate && currentIds.has(candidate.group)) charts.set(entry.chart, candidate);
-        throw new SpecError(`Chart replacement outcome is uncertain: original group ${entry.group} is absent${candidate ? `; candidate group ${candidate.group}` : ""}. No call was retried. Inspect current state before continuing.`);
+        const message = `Chart replacement outcome is uncertain: original group ${entry.group} is absent${candidate ? `; candidate group ${candidate.group} ${currentIds.has(candidate.group) ? "present" : "also absent"}` : ""}.`;
+        const recorded = candidate && currentIds.has(candidate.group) ? candidate : entry;
+        recorded.uncertain = message; charts.set(entry.chart, recorded);
+        throw new SpecError(`${message} No call was retried. Inspect current state before continuing.`);
       }
       // All calls are in the runtime FIFO; only newly created top-level roots belong to this attempt.
       const added = current.spreads.flatMap(s => s.items.filter(i => !before.has(i.id)).map(i => i.id));
       try { if (added.length) await dc.execute("edit.clear", { ids: added }); }
-      catch { throw new SpecError(`Original chart ${entry.chart} was kept; cleanup of candidate items ${added.join(", ")} failed. Inspect these items before retrying.`); }
+      catch {
+        const labels = committing && candidate ? [chartLabel(entry.chart), ...candidate.items.map(i => chartLabel(entry!.chart, i.key))] : [];
+        entry.uncertain = `Original chart ${entry.chart} was kept; cleanup of candidate items ${added.join(", ")} failed. Potentially duplicated definitive labels: ${labels.join(", ") || "none"}.`;
+        throw new SpecError(`${entry.uncertain} Inspect these items before retrying.`);
+      }
       throw new SpecError(`Original chart ${entry.chart} was kept; ${committing ? "replacement" : "drawing"} failed: ${(e as Error).message}`);
     }
     charts.set(entry.chart, candidate!);
     const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 ? ` The chart had been moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} pt; it was redrawn there.` : "";
-    let images: ToolContent[] = []; let previewWarning = "";
-    try { images = await render(candidate!, args.render); }
-    catch { previewWarning = " Chart updated; preview unavailable. Inspect or render the page before further edits."; }
-    return { content: [text(`Chart ${entry.chart} redrawn on page ${candidate!.page + 1}.${moved} No hand changes inside the chart. ${describe(check!)}${previewWarning}`), ...images] };
+    const images = await render(candidate!, args.render);
+    const previewWarning = images.some(c => c.type === "text") ? " Chart updated; preview unavailable." : "";
+    const changes = found.changes.length ? ` Discarded confirmed hand changes: ${found.changes.map(c => `${c.key}: ${c.change}`).join("; ")}.` : " No hand changes inside the chart.";
+    return { content: [text(`Chart ${entry.chart} redrawn on page ${candidate!.page + 1}.${moved}${changes} ${describe(check!)}${previewWarning}`), ...images] };
   }
 
   return {
@@ -140,13 +154,14 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
       },
       {
         name: "chart_update",
-        description: "Redraw a chart made with chart_create in place, with new data or a changed spec. It refuses to redraw when internal hand changes are detected, preserving the original until HOT-66 implements keeping them. Invalid input or a failed candidate leaves the original in place. A move of the whole chart is kept.",
+        description: "Redraw a chart made with chart_create in place, with new data or a changed spec. It refuses to redraw when internal hand changes are detected, preserving the original. Only after showing the changes and obtaining explicit confirmation may discard_hand_changes: true override this guard (keeping hand fixes is HOT-66). Invalid input or a failed candidate leaves the original in place. A move of the whole chart is kept.",
         inputSchema: {
           type: "object",
           properties: {
             chart: { type: "string", description: "The chart id from chart_create, or the label or id of its frame" },
+            discard_hand_changes: { type: "boolean", description: "Discard detected internal hand changes, only after showing their list and receiving explicit confirmation (default false)" },
             data: { type: "object", description: "New data: {url} or {values}" },
-            spec: { type: "object", description: "Spec fields to replace (top-level keys)" },
+            spec: { type: "object", description: "Spec fields to replace (top-level keys; a partial encoding replaces the entire encoding object)" },
             render: { type: "boolean", description: "Return a render of the page (default true)" },
           },
           required: ["chart"],
@@ -157,7 +172,7 @@ const chart: ToolFactory = ({ dc, root, readRoots }) => {
     async call(name, args) {
       if (name === "chart_create") return create(args);
       if (name === "chart_update") return update(args);
-      return { content: [text(JSON.stringify([...charts.values()].map(({ chart, frame, page, spec }) => ({ chart, frame, page: page + 1, spec })), null, 2))] };
+      return { content: [text(JSON.stringify([...charts.values()].map(({ chart, frame, page, spec, uncertain }) => ({ chart, frame, page: page + 1, spec, uncertain })), null, 2))] };
     },
     saved: () => (charts.size ? { charts: [...charts.values()] } : undefined),
     opened(state) {
