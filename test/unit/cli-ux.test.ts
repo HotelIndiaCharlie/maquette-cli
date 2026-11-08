@@ -161,3 +161,13 @@ test("interrupting a call keeps queued input and runs it after the actual call f
     release(); await Promise.all([first, next]); await tick(); assert.match(v.frame(), /❯ \/sessions/); assert.equal(s.busy, false); assert.equal(server.calls.length, 1);
   } finally { v.close(); }
 });
+
+test("structured origins preserve titles and presentation when prompt wording changes", () => {
+  const server = fakeServer(), j = new SessionJournal(server.root, { provider: "fake", model: "fake" });
+  j.append("call_start", { id: "d", name: "inspect_document", args: {}, source: "prompt" });
+  j.append("call_result", { id: "d", reply: { tool: "inspect_document", source: "prompt", ok: true, text: "Inspected", images: [] } });
+  j.append("message", { role: "user", meta: { origin: "direct", command: "inspect_document" }, parts: [{ type: "text", text: "Changed narrative wording" }] });
+  j.append("message", { role: "user", meta: { origin: "skill", command: "/custom-skill purpose" }, parts: [{ type: "text", text: "Different skill wording" }] });
+  const view = restorePresentation(j.records);
+  assert.equal(view.items[0].kind, "user"); assert.equal((view.items[0] as any).text, "inspect_document"); assert.equal(view.items[1].kind, "tool"); assert.ok(view.items.some(i => i.kind === "user" && i.text === "/custom-skill purpose")); j.close();
+});

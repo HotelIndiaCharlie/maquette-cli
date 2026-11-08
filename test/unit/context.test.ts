@@ -51,7 +51,7 @@ test("oversized tool data is limited only at first ingestion with full output re
 });
 
 test("connection loss still commits paired results with an uncertain outcome and never retries", async () => {
-  const server = fakeServer(); let attempts = 0; server.enqueue = async () => { attempts++; throw new Error("connection reset"); };
+  const server = fakeServer(); let attempts = 0; server.enqueue = async () => { attempts++; throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" }); };
   const provider = new FakeProvider([{ calls: [{ name: "save_document" }] }, { text: "Unknown outcome; inspect first." }]);
   const s = new AgentSession({ server, provider, settings: settings({ permissions: { mode: "auto" } }), projectFile: join(server.root, "settings.json"), persist: true });
   await s.submit("save"); assert.equal(attempts, 1); assert.match(JSON.stringify(provider.requests[1].messages), /outcome unknown/); assert.equal(s.needsInspection, true); s.close();
@@ -63,4 +63,23 @@ test("compaction's own native payload is retained in the journal without editing
   const s = new AgentSession({ server, provider: new NativeSummary([]), settings: settings(), projectFile: join(server.root, "settings.json"), persist: true }); history().forEach(m => s.commit(m));
   await s.submit("/compact"); const compact = s.journal!.records.findLast(r => r.type === "compact")!;
   assert.equal(compact.data.response.native.content[0].signature, "exact-native-summary"); s.close();
+});
+
+test("summary requests use text alone with tool and signed thinking history, including after switching models", async () => {
+  const server = fakeServer(); const provider = new FakeProvider([{ text: "Summary" }]);
+  const s = new AgentSession({ server, provider, settings: settings(), projectFile: join(server.root, "settings.json") });
+  s.history = history(); await s.submit("/compact");
+  const r = provider.requests[0]; assert.equal(r.tools, undefined);
+  assert.ok(r.messages.every(m => !('native' in m) && m.parts.every(p => p.type === "text")));
+  assert.match(JSON.stringify(r.messages), /Called inspect_document/); assert.match(JSON.stringify(r.messages), /Result of inspect_document/);
+  assert.doesNotThrow(() => compactBoundary(history(), 0));
+});
+
+test("local validation errors aren't mislabeled as lost connections and UTF-8 truncation stays valid", async () => {
+  const server = fakeServer(); server.enqueue = async () => { throw new SyntaxError("invalid local JSON"); };
+  const s = new AgentSession({ server, provider: new FakeProvider([]), settings: settings(), projectFile: join(server.root, "settings.json") });
+  await assert.rejects(() => s.dispatch("save_document", {}, "model"), /invalid local JSON/); assert.equal(s.needsInspection, false);
+  const text = "a".repeat(29999) + "漢".repeat(20);
+  const content = s.ingestReply({ id: 1, tool: "read_file", source: "model", ms: 0, images: [], text, ok: true });
+  assert.doesNotMatch(JSON.stringify(content), /�/);
 });

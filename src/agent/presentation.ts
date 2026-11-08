@@ -25,7 +25,7 @@ export function collapseTools<T extends { kind: string }>(items: T[]): T[] {
 }
 export function titleFromInput(text: string, kind: string): string | undefined {
   if (kind === "command" || kind === "exit") return undefined;
-  if (kind === "slash" && !/^\/(init|report-review|designcraft|chart)(\s|$)/.test(text)) return undefined;
+  if (kind === "slash" && !/^\/init(\s|$)/.test(text)) return undefined;
   let title = text.trim().split(/\r?\n/, 1)[0].replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ");
   if (/^\/init(?:\s|$)/.test(title)) title = title.replace(/^\/init/, "Initialize project");
   if (!title) return undefined;
@@ -39,6 +39,11 @@ export function legacyInput(text: string): string {
   if (/^(Shared runtime notice:|MAQUETTE.md changed|MAQUETTE.md was removed|Continuation summary|Result of `maquette call )/.test(text)) return "";
   return text;
 }
+function messageInput(message: any): string {
+  if (message.meta?.origin === "notice") return "";
+  if (message.meta?.command) return `${message.meta.origin === "shell" ? "!" : ""}${message.meta.command}`;
+  return legacyUser(message.parts);
+}
 function legacyUser(parts: any[]): string {
   const input = parts.filter(p => p.type === "text").map(p => legacyInput(p.text)).filter(Boolean).join("\n");
   return rawDirect(parts)?.shell ? `!${input}` : input;
@@ -48,8 +53,8 @@ export function sessionTitle(records: SessionRecord[]): string {
   if (named) return named.data.sessionTitle;
   for (const r of records) {
     if (r.type === "message" && r.data.role === "user" && !r.data.parts.some((p: any) => p.type === "tool_result")) {
-      const text = legacyUser(r.data.parts);
-      const skill = r.data.parts.some((p: any) => p.type === "text" && /^The person invoked \//.test(p.text));
+      const text = messageInput(r.data);
+      const skill = r.data.meta?.origin === "skill" || r.data.parts.some((p: any) => p.type === "text" && /^The person invoked \//.test(p.text));
       const title = titleFromInput(text, skill ? "skill" : text.startsWith("/") ? "slash" : "message"); if (title) return title;
     }
   }
@@ -90,9 +95,9 @@ function restoreLegacy(records: SessionRecord[]): DisplayItem[][] {
     if (r.type === "message") {
       const m = r.data;
       if (m.role === "user" && !m.parts.some((p: any) => p.type === "tool_result")) {
-        const input = legacyUser(m.parts);
+        const input = messageInput(m);
         if (input) {
-          const direct = rawDirect(m.parts);
+          const direct = m.meta ? ["direct", "shell"].includes(m.meta.origin) : rawDirect(m.parts);
           group = [{ kind: "user", text: input }];
           if (direct) { group.push(...pending); pending = []; }
           groups.push(group);

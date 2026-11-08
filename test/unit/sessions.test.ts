@@ -32,8 +32,8 @@ test("writer exclusion, trailing crash line recovered into a copy, internal corr
   j.close(); appendFileSync(j.path, '{"partial":'); const original = readFileSync(j.path);
   const r = new SessionJournal(dir, { ...options, resume: id });
   assert.notEqual(r.path, j.path); assert.ok(r.warnings.length); assert.deepEqual(readFileSync(j.path), original); r.close();
-  writeFileSync(j.path, original.toString().split("\n")[0] + "\nnot json\n");
-  assert.throws(() => new SessionJournal(dir, { ...options, resume: id }), /Corrupt.*line 2/);
+  writeFileSync(r.path, original.toString().split("\n")[0] + "\nnot json\n");
+  assert.throws(() => new SessionJournal(dir, { ...options, resume: r.id }), /Corrupt.*line 2/);
 });
 test("uncertain calls are paired without execution, partial replies do not become native messages", () => {
   const dir = root(); const j = new SessionJournal(dir, options);
@@ -66,4 +66,63 @@ test("a process crash releases ownership on recovery; unsupported versions and c
   assert.throws(() => new SessionJournal(dir, { ...options, resume: child.stdout }), /Unsupported session version/);
   writeFileSync(path, raw + JSON.stringify({ v: 1, seq: raw.trim().split("\n").length + 1, at: "today", type: "message", data: { role: "assistant", parts: [{ type: "tool_call", id: "bad" }] } }) + "\n");
   assert.throws(() => new SessionJournal(dir, { ...options, resume: child.stdout }), /Invalid message/);
+});
+
+test("twenty image renders keep base64 outside the journal and rehydrate verified snapshots", async () => {
+  const { statSync, readdirSync, unlinkSync } = await import("node:fs");
+  const dir = root(), j = new SessionJournal(dir, options);
+  const data = Buffer.alloc(512 * 1024, 7).toString("base64");
+  for (let i = 0; i < 20; i++) {
+    j.append("call_result", { id: String(i), reply: { tool: "render_page", ok: true, text: "rendered", images: [], result: { content: [{ type: "image", mimeType: "image/png", data }] } } });
+    j.append("message", { role: "user", parts: [{ type: "image", mediaType: "image/png", data }] });
+  }
+  assert.ok(statSync(j.path).size < 1_000_000); assert.ok(JSON.stringify(j.records).length < 1_000_000);
+  assert.ok(!readFileSync(j.path, "utf8").includes(data));
+  assert.equal((j.restore().messages[0].parts[0] as any).data, data);
+  const assetDir = join(dir, ".maquette/sessions/assets");
+  assert.equal(readdirSync(assetDir).length, 1); unlinkSync(join(assetDir, readdirSync(assetDir)[0]));
+  assert.match(JSON.stringify(j.restore().messages[0]), /image no longer available/); j.close();
+});
+
+test("latest resume skips locked conversations and repeated recovery reuses its copy without changing dates", async () => {
+  const dir = root(); const a = new SessionJournal(dir, options); a.append("message", { role: "user", parts: [{ type: "text", text: "earlier task" }] }); a.close();
+  const b = new SessionJournal(dir, options); b.append("message", { role: "user", parts: [{ type: "text", text: "current task" }] });
+  const resumed = await SessionJournal.open(dir, { ...options, resume: true }); assert.equal(resumed.id, a.id); resumed.close(); b.close();
+  const date = listSessions(dir).find(s => s.id === b.id)!.date; const size = readFileSync(b.path).length;
+  const reopened = await SessionJournal.open(dir, { ...options, resume: b.id }); reopened.close();
+  assert.equal(readFileSync(b.path).length, size); assert.equal(listSessions(dir).find(s => s.id === b.id)!.date, date);
+  appendFileSync(a.path, '{"partial":');
+  const recovered = await SessionJournal.open(dir, { ...options, resume: a.id }); recovered.close();
+  const twice = await SessionJournal.open(dir, { ...options, resume: a.id }); assert.equal(twice.id, recovered.id); twice.close();
+  assert.equal(listSessions(dir).find(s => s.id === a.id)!.recoveredAs, recovered.id);
+});
+
+test("inspection guard covers document changes while allowing opening, workspace and external tools", async () => {
+  const server = fakeServer(); server.tools = [...server.tools, { name: "bash", inputSchema: { type: "object" } }, { name: "app__write", inputSchema: { type: "object" }, _maquette: { builtin: false, server: "app", identity: "1" } }];
+  server.byName = new Map(server.tools.map(t => [t.name, t]));
+  const provider = new FakeProvider([{ calls: [{ name: "bash" }, { name: "app__write" }, { name: "save_document" }, { name: "open_document", input: { path: "example.designcraft" } }, { name: "save_document" }] }, { text: "done" }]);
+  const s = new AgentSession({ server, provider, settings: settings({ permissions: { mode: "auto" } }), projectFile: join(server.root, "settings.json"), persist: true });
+  const failures: string[] = []; s.on(e => { if (e.type === "tool_result" && e.failure) failures.push(e.failure); }); s.needsInspection = true;
+  await s.submit("continue");
+  assert.deepEqual(server.calls.map(c => c.tool), ["bash", "app__write", "open_document", "save_document"]);
+  assert.ok(failures.includes("policy.inspect_required")); assert.equal(s.needsInspection, false); s.close();
+});
+
+test("MCP diagnostics stay out of the journal and provider history; first external reads ask", async () => {
+  const server = fakeServer(); server.mcpLogs = async () => "PRIVATE_STDERR_DIAGNOSTIC";
+  server.tools = [...server.tools, { name: "app__fetch", inputSchema: { type: "object" }, annotations: { readOnlyHint: true }, _maquette: { server: "app", identity: "external-1" } }]; server.byName = new Map(server.tools.map(t => [t.name, t]));
+  const provider = new FakeProvider([{ calls: [{ name: "app__fetch" }, { name: "app__fetch" }] }, { text: "done" }]);
+  const s = new AgentSession({ server, provider, settings: settings(), projectFile: join(server.root, "settings.json"), persist: true });
+  let prompts = 0; s.on(e => { if (e.type === "ask_permission") { prompts++; e.reply("y"); } });
+  await s.submit("/mcp logs app"); assert.doesNotMatch(readFileSync(s.journal!.path, "utf8"), /PRIVATE_STDERR_DIAGNOSTIC/); assert.equal(s.history.length, 0);
+  await s.submit("fetch"); assert.equal(prompts, 1); assert.doesNotMatch(JSON.stringify(provider.requests), /PRIVATE_STDERR_DIAGNOSTIC/); s.close();
+});
+
+test("a durable render outcome rehydrates images even if the process crashed before committing results", () => {
+  const dir = root(), j = new SessionJournal(dir, options), data = Buffer.from("saved image bytes").toString("base64");
+  j.append("message", { role: "assistant", parts: [{ type: "tool_call", id: "render", name: "render_page", input: { page: 0 } }] });
+  j.append("call_start", { id: "render" });
+  j.append("call_result", { id: "render", reply: { tool: "render_page", ok: true, text: "Rendered", images: [] }, normalized: { type: "tool_result", id: "render", name: "render_page", content: [{ type: "text", text: "Rendered" }, { type: "image", mediaType: "image/png", data }] } });
+  const restored = j.restore(); assert.equal(restored.uncertain, false);
+  assert.equal((restored.messages.at(-1)!.parts[0] as any).content[1].data, data); j.close();
 });

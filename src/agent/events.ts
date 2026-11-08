@@ -17,6 +17,7 @@ export type Failure =
   | "model.max_tokens"
   | "model.bad_args" // the arguments weren't JSON, or didn't fit the tool
   | "model.unknown_tool" // a tool name that doesn't exist
+  | "policy.inspect_required"
   | "policy.plan_denied"
   | "user.declined"
   | "user.interrupted"
@@ -52,7 +53,7 @@ export type AgentEvent =
   | { type: "ask_permission"; id: string; name: string; input: Record<string, unknown>; reply: (answer: PermissionAnswer) => void }
   | { type: "choose"; title: string; options: Choice[]; current?: string; reply: (id: string | null) => void } // a list to pick from: arrows and numbers, esc for none
   | { type: "shell"; command: string; output: string; code: number | null } // a `!` command the person ran
-  | { type: "output"; text: string; ok?: boolean; images?: string[] } // a direct tool call's result or a command's text
+  | { type: "output"; ephemeral?: boolean; text: string; ok?: boolean; images?: string[] } // a direct tool call's result or a command's text
   | { type: "notice"; text: string; level: Level }
   | { type: "done"; stop?: StopReason; usage?: Usage; interrupted?: boolean } // the turn is over
   | { type: "status"; status: Status }
