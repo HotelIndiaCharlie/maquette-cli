@@ -12,6 +12,7 @@ import { fill, source } from "./prompts.ts";
 
 export type PromptInput = {
   root: string;
+  skills?: string;
   instructions: string;
   tools: Tool[];
   mode: Mode;
@@ -35,7 +36,7 @@ export function projectBlock(text: string | undefined): SystemBlock {
 export function environmentBlock(input: Omit<PromptInput, "project">): SystemBlock {
   const variables = { root: input.root, tools: input.textProtocol ? catalogue(input.tools) : "", instructions: input.instructions };
   const names = ["environment", ...(input.mode === "plan" ? ["plan-mode"] : []), ...(input.textProtocol ? ["text-protocol"] : []), "engine"];
-  return { name: "environment", text: names.map((n) => fill(n, variables)).join("\n\n"), cache: true, source: source(names, variables) };
+  return { name: "environment", text: [...names.map((n) => fill(n, variables)), ...(input.skills ? [input.skills] : [])].join("\n\n"), cache: true, source: source(names, variables) };
 }
 
 export const environmentText = (input: Omit<PromptInput, "project">) => environmentBlock(input).text;

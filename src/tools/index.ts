@@ -1,8 +1,9 @@
 // The tool modules Maquette loads, in the order their tools are listed.
+import skills from "./skills/index.ts";
 import chart from "./chart/index.ts";
 import memory from "./memory/index.ts";
 import survey from "./survey/index.ts";
 import workspace from "./workspace/index.ts";
 import type { ToolFactory } from "./types.ts";
 
-export const modules: ToolFactory[] = [chart, survey, memory, workspace];
+export const modules: ToolFactory[] = [chart, survey, memory, workspace, skills];

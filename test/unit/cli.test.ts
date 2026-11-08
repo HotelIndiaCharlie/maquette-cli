@@ -183,3 +183,21 @@ test("MAQUETTE_TRACE=0, false or off leaves tracing off; a URL turns it on and s
   const port = await closedPort();
   assert.match(await startLines({ MAQUETTE_TRACE: `http://127.0.0.1:${port}` }), new RegExp(`✓ Tracing to http://127\\.0\\.0\\.1:${port}, project maquette`));
 });
+
+test("unknown skills report one line without a stack trace", async () => {
+  const r = await run(["skills", "does-not-exist"], {});
+  assert.equal(r.code, 1); assert.match(r.stderr, /No valid skill named/);
+  assert.equal(r.stderr.trim().split("\n").length, 1); assert.doesNotMatch(r.stderr, /at |resolver\.ts/);
+});
+
+test("one MCP server can be added or removed without replacing the map or exposing credentials", async () => {
+  const base = mkdtempSync(join(tmpdir(), "maquette-cli-config-mcp-")), home = join(base, "home"), cwd = join(base, "project"); mkdirSync(home); mkdirSync(cwd);
+  const m = (...args: string[]) => runIn(cwd, home, args, {});
+  assert.equal((await m("config", "set", "mcpServers.first", '{"command":"first","env":{"TOKEN":"fixture-secret"}}')).code, 0);
+  const add = await m("config", "set", "mcpServers.second", '{"command":"second"}'); assert.equal(add.code, 0); assert.doesNotMatch(add.stdout, /fixture-secret/);
+  const file = join(home, ".maquette/settings.json"); assert.deepEqual(Object.keys(JSON.parse(readFileSync(file, "utf8")).mcpServers), ["first", "second"]);
+  assert.match((await m("config")).stdout, /mcpServers.*user/);
+  assert.doesNotMatch((await m("config", "get", "mcpServers.first")).stdout, /fixture-secret/);
+  assert.equal((await m("config", "get", "mcpServers.missing")).stdout, "");
+  assert.equal((await m("config", "unset", "mcpServers.second")).code, 0); assert.deepEqual(Object.keys(JSON.parse(readFileSync(file, "utf8")).mcpServers), ["first"]);
+});

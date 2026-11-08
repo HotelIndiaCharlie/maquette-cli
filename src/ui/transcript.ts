@@ -5,15 +5,9 @@ import { gist, tilde } from "../args.ts";
 import { Box, h, type ReactNode, Static, Text } from "./h.ts";
 import { Markdown } from "./markdown.ts";
 
-export type ToolItem = { kind: "tool"; id: string; name: string; input: Record<string, unknown>; source: "prompt" | "model" | "http"; done: boolean; ok?: boolean; text?: string; images?: string[]; ms?: number; expanded?: boolean };
-export type ItemBody =
-  | { kind: "banner"; lines: string[] }
-  | { kind: "user"; text: string }
-  | { kind: "answer"; text: string }
-  | ToolItem
-  | { kind: "shell"; command: string; output: string; code: number | null }
-  | { kind: "output"; text: string; ok: boolean; images?: string[] }
-  | { kind: "notice"; text: string; level: "info" | "warn" | "error" };
+export type { DisplayTool as ToolItem } from "../agent/presentation.ts";
+import type { DisplayTool as ToolItem, DisplayItem } from "../agent/presentation.ts";
+export type ItemBody = DisplayItem | { kind: "banner"; lines: string[] };
 export type Item = ItemBody & { key: number };
 
 export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -26,18 +20,21 @@ export function summarise(input: Record<string, unknown>): string {
 }
 
 export function ToolLine({ item, root, frame }: { item: ToolItem; root: string; frame: number }) {
+  const argumentsText = item.expanded ? JSON.stringify(item.input, null, 2) : "";
   const mark = !item.done ? h(Text, { color: "yellow" }, spinnerFrames[frame % spinnerFrames.length]) : item.ok ? h(Text, { color: "green" }, "✓") : h(Text, { color: "red" }, "✗");
   const bits: ReactNode[] = [mark, " "];
-  if (item.source === "http") bits.push(h(Text, { color: "magenta" }, "http "));
+  if (item.source === "http" || item.source === "mcp") bits.push(h(Text, { color: "magenta" }, `${item.source} `));
   bits.push(h(Text, { bold: true }, item.name));
+  if (item.calls?.length) bits.push(h(Text, { dimColor: true }, ` ×${item.calls.length}, same result`));
   const args = summarise(item.input);
   if (args) bits.push(h(Text, { dimColor: true }, ` ${gist(args, item.done && item.images?.length ? 50 : 70)}`));
   if (item.done) {
     if (item.ms !== undefined) bits.push(h(Text, { dimColor: true }, ` · ${item.ms >= 1000 ? `${(item.ms / 1000).toFixed(1)} s` : `${item.ms} ms`}`));
     for (const p of item.images ?? []) bits.push(h(Text, { color: "cyan" }, ` · ${relative(root, p)}`));
+    if (item.source === "prompt" && item.ok && item.text) bits.push(h(Text, { dimColor: true }, ` \u00b7 ${gist(item.text.replace(/\s+/g, " "), 120)}`));
     if (!item.ok && item.text) bits.push(h(Text, { color: "red" }, ` · ${gist(item.text.split("\n")[0], 80)}`));
   }
-  const detail = item.expanded ? h(Box, { flexDirection: "column", paddingLeft: 4 }, h(Text, { dimColor: true }, JSON.stringify(item.input, null, 2)), item.text ? h(Text, { color: item.ok ? undefined : "red" }, gist(item.text, 4000)) : null) : null;
+  const detail = item.expanded ? h(Box, { flexDirection: "column", paddingLeft: 4 }, h(Text, { dimColor: true }, gist(argumentsText, 2000)), argumentsText.length > 2000 ? h(Text, { color: "yellow" }, "Arguments truncated; full arguments are in the call records.") : null, item.calls ? h(Text, { dimColor: true }, item.calls.slice(-20).map(c => `${c.id} (${c.ms ?? 0} ms)`).join("\n"), item.calls.length > 20 ? "\nEarlier call IDs omitted; see full call records." : "") : null, item.text ? h(Text, { color: item.ok ? undefined : "red" }, gist(item.text, 4000)) : null, (item.text?.length ?? 0) > 4000 ? h(Text, { color: "yellow" }, "Result truncated; full result is in the call records.") : null) : null;
   return h(Box, { flexDirection: "column" }, h(Text, {}, ...bits), detail);
 }
 
@@ -61,8 +58,8 @@ export function renderItem(item: Item, root: string): ReactNode {
   }
 }
 
-// `generation` changes on a window resize: a fresh <Static> writes every item again, so the
-// whole transcript comes back, laid out at the new width, after the screen was cleared.
+// Reset only when selecting a different conversation, whose saved output must be displayed.
+// Keep the same <Static> through resizes so committed history is never appended again.
 export function Transcript({ items, root, generation = 0 }: { items: Item[]; root: string; generation?: number }) {
   return h(Static<Item>, { key: generation, items, children: (item: Item) => h(Box, { key: item.key, flexDirection: "column" }, renderItem(item, root)) });
 }

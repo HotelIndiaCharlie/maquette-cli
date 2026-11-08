@@ -69,4 +69,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: "text", text: `${e instanceof Error ? e.message : String(e)}${detail}` }], isError: true };
   }
 });
+let closing = false;
+async function close() {
+  if (closing) return;
+  closing = true;
+  await dc.client.close();
+  await server.close();
+}
+server.onclose = () => void close();
+process.once("SIGTERM", () => void close());
+process.once("SIGINT", () => void close());
 await server.connect(new StdioServerTransport());

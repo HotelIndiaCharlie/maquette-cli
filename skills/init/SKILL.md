@@ -13,11 +13,19 @@ Call `document_survey`. If no document is open, it lists the documents in the fo
 
 - One document: open it with `open_document`, then call `document_survey` again.
 - Several: ask which one in your round of questions (step 3), and survey it once the person answers.
-- None: say so, and say that `open_document <file>` or `example` gets one; stop there.
+- None: say so, read the relevant supporting evidence in step 1b, then ask how to obtain the working document (`open_document <file>` or `example`). Do not invent visual rules or create a layout unasked.
 
 If the document came from InDesign (`.idml`, `.indd`, `.indt`), DesignCraft never saves over it. Save a working copy once it's open, `save_document --path <same name>.designcraft`, and name that file in MAQUETTE.md as the working file. If there's already a `.designcraft` copy beside it, ask which is the working file instead of making another.
 
 If the survey says the document opened with warnings, say "opened with N warnings" in one line and nothing more. They don't go in MAQUETTE.md.
+
+## 1b. Read the folder's supporting evidence
+
+The survey includes a bounded folder map even without an open document. Use that map (or tree with a narrower path) to select **at most five supporting text files and three reference/linked images**. State the chosen relative paths and a short reason for each before reading them with read_file/view_image. Names alone are not evidence: actually read selected files. Prefer the brief and explicit brand/style guides to visual guesses. Do not open extra files merely to exhaust the budget.
+
+For a PDF guide, only use an already installed pdftotext through bash with normal permissions; first check its availability. If absent, explicitly state which PDF was not read and ask only for its missing guidance. Never install converters. Do not infer rules from an unread PDF.
+
+If guides conflict, ask which authority governs and wait before choosing. Cite each authoritative source's project-relative path and its role concisely in MAQUETTE.md. Avoid copying whole sources. Reruns still require agreement before changing existing memory.
 
 ## 2. Study it
 
@@ -34,11 +42,11 @@ If you can't see the renders (the model has no vision), work from the styles, sw
 
 ## 3. Ask one round of questions
 
-Ask two or three questions, together in one message, only about what the pages can't answer:
+Ask only unresolved questions, at most two or three together, using both the pages and the brief/guides already read. Omit questions already answered by those sources; if nothing remains unclear, do not manufacture questions:
 
 1. What the document is for and who reads it, if the pages leave it open.
 2. What you may change: text, charts, images, layout, or only some of these.
-3. Whether a house style or brand guide exists that this file should defer to.
+3. Whether a house style or brand guide exists, only if the selected files and memory have not already answered it.
 
 Add the which-document or which-working-file question here if step 1 needed it. Don't ask about mechanics you can look up. Then stop and wait for the answers.
 
@@ -59,6 +67,8 @@ Working file: <name>.designcraft
 ### Grid and rhythm
 ### Imagery
 ## Conventions
+## Authoritative sources
+- `<relative/path>` — role and concise evidence
 ## Decisions
 ### Stated
 - <what the person told you, dated YYYY-MM-DD>
@@ -78,3 +88,5 @@ When MAQUETTE.md already exists, the person's words in it are theirs. Survey aga
 ## When you're done
 
 Say in a few lines what MAQUETTE.md now covers, the working file, and that the person can edit the file by hand at any time. From now on, when the person makes a design call worth keeping, offer to record it with `memory_add`.
+
+In plan mode, list any PDF-only guide as unread and ask for the missing guidance; do not run bash to check or invoke pdftotext.
