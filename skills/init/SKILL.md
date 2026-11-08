@@ -88,3 +88,5 @@ When MAQUETTE.md already exists, the person's words in it are theirs. Survey aga
 ## When you're done
 
 Say in a few lines what MAQUETTE.md now covers, the working file, and that the person can edit the file by hand at any time. From now on, when the person makes a design call worth keeping, offer to record it with `memory_add`.
+
+In plan mode, list any PDF-only guide as unread and ask for the missing guidance; do not run bash to check or invoke pdftotext.

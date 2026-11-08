@@ -5,7 +5,7 @@
 // count as changes, so in ask mode they ask first; reads, `glob`, `grep` and `view_image` don't.
 import { Refused, confine } from "./paths.ts";
 export { confine } from "./paths.ts";
-import { folderMap } from "./tree.ts";
+import { folderMap, formatFolderMap } from "./tree.ts";
 import { spawn } from "node:child_process";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -209,7 +209,7 @@ const workspace: ToolFactory = ({ root }) => {
 
   async function call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     switch (name) {
-      case "tree": return ok(JSON.stringify(await folderMap(root, args.path === undefined ? "." : str(args, "path"), args.depth === undefined ? 3 : args.depth as number)));
+      case "tree": return ok(formatFolderMap(await folderMap(root, args.path === undefined ? "." : str(args, "path"), args.depth === undefined ? 3 : args.depth as number)));
       case "bash": {
         const seconds = Math.min(300, Math.max(1, typeof args.timeout === "number" ? args.timeout : 120));
         const { output, code, timedOut } = await runShell(str(args, "command"), root, { timeout: seconds * 1000, cap: 30_000 });

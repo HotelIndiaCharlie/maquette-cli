@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { folderMap } from "../../src/tools/workspace/tree.ts";
+import { folderMap, formatFolderMap } from "../../src/tools/workspace/tree.ts";
 import workspace from "../../src/tools/workspace/index.ts";
 import survey from "../../src/tools/survey/index.ts";
 import { AgentSession } from "../../src/agent/session.ts";
@@ -45,7 +45,7 @@ test("tree and survey without a document use the same map", async () => {
   const context = { root: dir, readRoots: [dir], warnings: () => [], dc: { async json() { throw new Error("no document"); } } as any };
   const tree = await workspace(context).call("tree", {}); const s = await survey(context).call("document_survey", {});
   const last = s.content.filter(c => c.type === "text").at(-1)!.text!;
-  assert.deepEqual(JSON.parse(last).folder, JSON.parse(text(tree))); assert.match(text(s), /No document is open/);
+  assert.equal(formatFolderMap(JSON.parse(last).folder), text(tree)); assert.match(text(s), /No document is open/);
 });
 test("scripted init reads selected brief, cites it and preserves existing memory until agreed", async () => {
   const server = fakeServer(); writeFileSync(join(server.root, "brief.md"), "Audience: members. Use blue."); writeFileSync(join(server.root, "MAQUETTE.md"), "# Keep the designer's words\n");
@@ -56,4 +56,27 @@ test("scripted init reads selected brief, cites it and preserves existing memory
   const s = new AgentSession({ server, settings: settings(), provider, projectFile: join(server.root, "settings.json") }); await s.submit("/init");
   const instruction = JSON.stringify(provider.requests[0].messages); assert.match(instruction, /at most five supporting text files and three/); assert.match(instruction, /If guides conflict/); assert.match(instruction, /already installed pdftotext/);
   assert.match(JSON.stringify(provider.requests[1].messages), /Audience: members/); assert.equal((await ws.call("read_file", { path: "MAQUETTE.md" })).content[0].text, "# Keep the designer's words");
+});
+
+test("a 3000-image Links folder leaves the brief and guide siblings discoverable", async () => {
+  const dir = root(); mkdirSync(join(dir, "Links")); mkdirSync(join(dir, "brief")); mkdirSync(join(dir, "guides"));
+  for (let i = 0; i < 3000; i++) writeFileSync(join(dir, "Links", `${i}.png`), "img");
+  writeFileSync(join(dir, "brief/brief.md"), "evidence"); writeFileSync(join(dir, "guides/brand.md"), "guide");
+  const map = await folderMap(dir);
+  assert.ok(map.visited < 250); assert.equal(map.partial, true);
+  assert.ok(map.lines.some(l => /brief\/brief\.md \(8 bytes\)/.test(l)));
+  assert.ok(map.lines.some(l => /guides\/brand\.md \(5 bytes\)/.test(l)));
+  assert.match(map.lines.find(l => /Links\//.test(l))!, /sampled\/partial/);
+  await assert.rejects(() => folderMap(dir, "missing/folder"), /^Error: No such folder: missing\/folder$/);
+  await assert.rejects(() => folderMap(dir, "../missing"), /outside/);
+});
+
+test("folder-map failure leaves document inspection available in survey", async () => {
+  const dir = join(root(), "missing");
+  const context = { root: dir, readRoots: [dir], warnings: () => [], dc: {
+    async json() { return { title: "Open report", path: null, layers: [], spreads: [], stories: [], paragraphStyles: [], characterStyles: [] }; },
+    async execute() { throw new Error("no file facts"); },
+  } as any };
+  const r = await survey(context).call("document_survey", { pages: 0 });
+  assert.match(text(r), /Survey of Open report/); assert.match(text(r), /"folder":\{"error":/);
 });
