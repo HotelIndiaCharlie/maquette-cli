@@ -227,8 +227,6 @@ export class Tracing {
                 }
                 break;
             case "tool_result": {
-                if (e.source && e.source !== "model")
-                    break;
                 if (!this.turn)
                     break;
                 const t = e.timing ?? { permission: 0, queue: 0, run: e.ms };
@@ -305,8 +303,6 @@ export class Tracing {
         // The model's calls are traced from the agent's events; these are the ones typed at the
         // prompt or sent by other sessions.
         // The event comes as the call finishes, so now is its end.
-        if (e.type !== "call")
-            return;
         const { reply, args } = e;
         if (reply.source === "model")
             return;

@@ -2,7 +2,6 @@
 // notices and the shortcut list.
 import { gist } from "../args.js";
 import { count, dollars } from "../agent/cost.js";
-import { collapseTools } from "../agent/presentation.js";
 import { Box, h, Text, useEffect, useState } from "./h.js";
 import { Markdown } from "./markdown.js";
 import { summarise, spinnerFrames, ToolLine } from "./transcript.js";
@@ -20,16 +19,10 @@ export function useSpinner(on) {
 // The answer streaming in: its text so far and the tool calls made along the way, in order.
 export function Turn({ segments, root, waiting }) {
     const frame = useSpinner(true);
-    const nodes = collapseTools(segments).map((s, i) => s.kind === "text" ? h(Box, { key: i, paddingLeft: 2, marginTop: 1 }, h(Markdown, { text: s.text })) : s.kind === "notice" ? h(Box, { key: i, paddingLeft: 2 }, h(Text, { color: s.level === "error" ? "red" : "yellow" }, s.text)) : h(Box, { key: i, paddingLeft: 2 }, h(ToolLine, { item: s, root, frame })));
+    const nodes = segments.map((s, i) => (s.kind === "text" ? h(Box, { key: i, paddingLeft: 2, marginTop: 1 }, h(Markdown, { text: s.text })) : h(Box, { key: i, paddingLeft: 2 }, h(ToolLine, { item: s, root, frame }))));
     if (waiting)
         nodes.push(h(Box, { key: "w", paddingLeft: 2, marginTop: segments.length ? 0 : 1 }, h(Text, { color: "yellow" }, `${spinnerFrames[frame % spinnerFrames.length]} `), h(Text, { dimColor: true }, "thinking… (esc or ctrl+c to stop)")));
     return h(Box, { flexDirection: "column" }, ...nodes);
-}
-export function Progress({ activity }) {
-    const frame = useSpinner(true);
-    const count = activity.progress ? ` ${activity.progress.current}/${activity.progress.total}` : "";
-    const queued = activity.queued ? ` (${activity.queued} queued input${activity.queued === 1 ? "" : "s"})` : "";
-    return h(Box, { marginTop: 1, paddingLeft: 2 }, h(Text, { color: "yellow" }, `${spinnerFrames[frame % spinnerFrames.length]} ${activity.label}${count}${queued}`));
 }
 // Display only: the input box answers the keys, so none is lost while this appears.
 export function PermissionPrompt({ name, input }) {
@@ -59,7 +52,7 @@ export function Picker({ title, options, index }) {
     const first = options.indexOf(shown[0]);
     return h(Box, { flexDirection: "column", borderStyle: "round", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, marginTop: 1 }, h(Text, { bold: true }, title), ...shown.map((o, j) => {
         const i = first + j;
-        const on = i === index && !o.disabled;
-        return h(Text, { key: o.id, color: on ? "cyan" : undefined, dimColor: o.disabled, bold: on }, `${on ? "›" : " "} ${String(i + 1).padStart(2)}. ${o.label.padEnd(width)}`, o.hint ? h(Text, { dimColor: !on, color: on ? "cyan" : undefined }, `  ${o.hint}`) : null);
+        const on = i === index;
+        return h(Text, { key: o.id, color: on ? "cyan" : undefined, bold: on }, `${on ? "›" : " "} ${String(i + 1).padStart(2)}. ${o.label.padEnd(width)}`, o.hint ? h(Text, { dimColor: !on, color: on ? "cyan" : undefined }, `  ${o.hint}`) : null);
     }), h(Text, { dimColor: true }, `↑ ↓ move · 1–${Math.min(9, options.length)} pick · enter take · esc none${options.length > shown.length ? ` · ${options.length} in all` : ""}`));
 }

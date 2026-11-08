@@ -3,9 +3,6 @@
 // The file tools are confined to the folder as DesignCraft is: a path that leads outside it,
 // by `../`, an absolute path or a symlink, is refused. Writes, edits, `bash` and `open_file`
 // count as changes, so in ask mode they ask first; reads, `glob`, `grep` and `view_image` don't.
-import { Refused, confine } from "./paths.js";
-export { confine } from "./paths.js";
-import { folderMap } from "./tree.js";
 import { spawn } from "node:child_process";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -15,11 +12,49 @@ import { imageType } from "../../images.js";
 const text = (t) => ({ type: "text", text: t });
 const ok = (t) => ({ content: [text(t)] });
 const refuse = (t) => ({ content: [text(t)], isError: true });
+class Refused extends Error {
+}
 // Never walked: they're large and nobody means them.
 const skip = new Set(["node_modules", ".git"]);
 const readCap = 200_000; // characters of a file read_file gives back at once
 const imageCap = 5 * 1024 * 1024; // the largest image models take
 const binary = (bytes) => bytes.subarray(0, 8000).includes(0);
+// The real path `p` names inside `root`, following every symlink on the way, or a Refused
+// error when it leads outside. A file that doesn't exist yet is checked through its nearest
+// existing folder, so write_file can make it; a dangling symlink is refused.
+export function confine(root, p) {
+    const realRoot = realpathSync(root);
+    const outside = () => new Refused(`${p} is outside ${tilde(realRoot)}. These tools only work inside the folder Maquette runs in.`);
+    const target = resolve(realRoot, expandHome(p));
+    const rest = [];
+    let at = target;
+    for (;;) {
+        let exists = true;
+        try {
+            lstatSync(at);
+        }
+        catch {
+            exists = false;
+        }
+        if (exists) {
+            let real;
+            try {
+                real = realpathSync(at);
+            }
+            catch {
+                throw outside(); // a symlink that leads nowhere could lead anywhere once written
+            }
+            const full = join(real, ...rest);
+            if (full !== realRoot && !full.startsWith(realRoot + sep))
+                throw outside();
+            return full;
+        }
+        if (dirname(at) === at)
+            throw outside();
+        rest.unshift(basename(at));
+        at = dirname(at);
+    }
+}
 // A glob as a regular expression over /-separated paths: `**` crosses folders, `*` and `?`
 // don't, `{a,b}` is either, `[…]` a set.
 export function globRegex(pattern) {
@@ -99,7 +134,6 @@ const base = (pattern) => {
     return parts.slice(0, fixed < 0 ? parts.length - 1 : fixed).join("/");
 };
 const tools = [
-    { name: "tree", description: "Bounded deterministic folder map with file sizes, extension summaries, collapsed large directories and explicit partial counts. Directory symlinks are not followed.", inputSchema: { type: "object", properties: { path: { type: "string", description: "Project folder (default .)" }, depth: { type: "integer", minimum: 0, maximum: 6, description: "Default 3, range 0–6" } } }, annotations: { readOnlyHint: true } },
     {
         name: "bash",
         description: "Run a shell command in the folder Maquette runs in, and get its output (stdout and stderr together, capped) and exit code. For tests, scripts, wc, ls and the like. It stops at its timeout. Not for reading or changing files that read_file, write_file and edit_file can handle.",
@@ -216,7 +250,6 @@ const workspace = ({ root }) => {
     };
     async function call(name, args) {
         switch (name) {
-            case "tree": return ok(JSON.stringify(await folderMap(root, args.path === undefined ? "." : str(args, "path"), args.depth === undefined ? 3 : args.depth)));
             case "bash": {
                 const seconds = Math.min(300, Math.max(1, typeof args.timeout === "number" ? args.timeout : 120));
                 const { output, code, timedOut } = await runShell(str(args, "command"), root, { timeout: seconds * 1000, cap: 30_000 });

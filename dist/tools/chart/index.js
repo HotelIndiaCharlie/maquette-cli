@@ -1,8 +1,4 @@
-// The chart tool: draws a whole chart into a frame in one call, as ordinary DesignCraft items
-// in the document's Chart styles, checks it against the data and returns a render; later it
-// redraws the chart with new data or spec fields.
-import { randomUUID } from "node:crypto";
-import { chartLabel, drawChart, handChanges, prepareChart, resolveFrame } from "./draw.js";
+import { chartLabel, drawChart, handChanges, resolveFrame } from "./draw.js";
 import { SpecError } from "./spec.js";
 const SPEC = `A Vega-Lite subset:
 - data: {url: "example/data/file.csv"} (CSV with a header row, inside the folder Maquette runs in) or {values: [rows]}
@@ -21,12 +17,6 @@ Print extensions:
   points: {"field": "farm", "top": 3, "by": "hectares"} names the 3 largest by hectares; or {"field": "farm", "include": ["Elmstead"]}
 - names: {raw value: display name} for series, legend entries and categories
 Axis titles appear only when given. Formats are d3-format (",.1f") and d3-time-format ("%b %Y"); negative numbers get a true minus sign.`;
-function itemIds(ins) {
-    const ids = new Set();
-    const visit = (i) => { ids.add(i.id); i.children?.forEach(visit); };
-    ins.spreads.forEach(s => s.items.forEach(visit));
-    return ids;
-}
 const text = (t) => ({ type: "text", text: t });
 function describe(check) {
     return [
@@ -43,8 +33,6 @@ const chart = ({ dc, root, readRoots }) => {
         if (wanted === false)
             return [];
         const r = await dc.call("render_page", { page: entry.page });
-        if (r.isError)
-            throw new SpecError("Page render failed.");
         return r.content.filter((c) => c.type === "image");
     }
     async function create(args) {
@@ -76,61 +64,17 @@ const chart = ({ dc, root, readRoots }) => {
         if (!found)
             throw new SpecError(`chart ${entry.chart}'s group is no longer in the document`);
         const spec = { ...entry.spec, ...(args.spec ?? {}), ...(args.data ? { data: args.data } : {}) };
-        if (found.changes.length)
-            throw new SpecError(`Chart ${entry.chart} was not changed. Internal hand changes cannot be preserved yet (HOT-66): ${found.changes.map(c => `${c.key}: ${c.change}`).join("; ")}. Keep the original and review these changes before updating.`);
         const [dx, dy] = found.offset;
-        const group = ins.spreads[entry.spread].items.find(i => i.id === entry.group);
+        const group = ins.spreads[entry.spread].items.find((i) => i.id === entry.group);
+        await dc.execute("edit.clear", { ids: [entry.group] });
         const rect = [entry.rect[0] + dx, entry.rect[1] + dy, entry.rect[2] + dx, entry.rect[3] + dy];
-        const prepared = prepareChart(spec, root, readRoots, rect);
-        const before = itemIds(ins);
-        let candidate;
-        let check;
-        let committing = false;
-        try {
-            const drawn = await drawChart(dc, { chart: entry.chart, labelChart: `${entry.chart}:pending:${randomUUID()}`, frame: { id: entry.frame, spread: entry.spread, page: entry.page, rect, layer: group?.layer }, spec: prepared.spec, prepared, root, readRoots });
-            candidate = drawn.entry;
-            check = drawn.check;
-            // batch is sequential, not atomic. The original is the very last effect removed.
-            const labels = candidate.items.map(i => ({ command: "object.label", params: { ids: [i.id], label: chartLabel(entry.chart, i.key) } }));
-            committing = true;
-            await dc.batch([...labels, { command: "object.label", params: { ids: [candidate.group], label: chartLabel(entry.chart) } }, { command: "edit.clear", params: { ids: [entry.group] } }]);
-        }
-        catch (e) {
-            let current;
-            try {
-                current = await dc.inspect();
-            }
-            catch {
-                throw new SpecError(`Chart update outcome is uncertain; the engine could not be inspected. Do not retry automatically. Inspect the original and any pending group before continuing.`);
-            }
-            const currentIds = itemIds(current);
-            if (!currentIds.has(entry.group)) {
-                if (candidate && currentIds.has(candidate.group))
-                    charts.set(entry.chart, candidate);
-                throw new SpecError(`Chart replacement outcome is uncertain: original group ${entry.group} is absent${candidate ? `; candidate group ${candidate.group}` : ""}. No call was retried. Inspect current state before continuing.`);
-            }
-            // All calls are in the runtime FIFO; only newly created top-level roots belong to this attempt.
-            const added = current.spreads.flatMap(s => s.items.filter(i => !before.has(i.id)).map(i => i.id));
-            try {
-                if (added.length)
-                    await dc.execute("edit.clear", { ids: added });
-            }
-            catch {
-                throw new SpecError(`Original chart ${entry.chart} was kept; cleanup of candidate items ${added.join(", ")} failed. Inspect these items before retrying.`);
-            }
-            throw new SpecError(`Original chart ${entry.chart} was kept; ${committing ? "replacement" : "drawing"} failed: ${e.message}`);
-        }
-        charts.set(entry.chart, candidate);
+        const { entry: next, check } = await drawChart(dc, { chart: entry.chart, frame: { id: entry.frame, spread: entry.spread, page: entry.page, rect, layer: group?.layer }, spec, root, readRoots });
+        charts.set(entry.chart, next);
         const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 ? ` The chart had been moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} pt; it was redrawn there.` : "";
-        let images = [];
-        let previewWarning = "";
-        try {
-            images = await render(candidate, args.render);
-        }
-        catch {
-            previewWarning = " Chart updated; preview unavailable. Inspect or render the page before further edits.";
-        }
-        return { content: [text(`Chart ${entry.chart} redrawn on page ${candidate.page + 1}.${moved} No hand changes inside the chart. ${describe(check)}${previewWarning}`), ...images] };
+        const hand = found.changes.length
+            ? ` Not kept: ${found.changes.length} hand change${found.changes.length > 1 ? "s" : ""} inside the chart, redrawn from the data because keeping hand changes isn't built yet: ${found.changes.map((c) => `${c.key} ${c.change}`).join("; ")}.`
+            : " No hand changes inside the chart.";
+        return { content: [text(`Chart ${entry.chart} redrawn on page ${next.page + 1}.${moved}${hand} ${describe(check)}`), ...(await render(next, args.render))] };
     }
     return {
         name: "chart",
@@ -152,7 +96,7 @@ const chart = ({ dc, root, readRoots }) => {
             },
             {
                 name: "chart_update",
-                description: "Redraw a chart made with chart_create in place, with new data or a changed spec. It refuses to redraw when internal hand changes are detected, preserving the original until HOT-66 implements keeping them. Invalid input or a failed candidate leaves the original in place. A move of the whole chart is kept.",
+                description: "Redraw a chart made with chart_create in place, with new data or a changed spec. It first lists what the designer changed by hand inside the chart; this version can't keep those changes yet and reports them instead. A move of the whole chart is kept.",
                 inputSchema: {
                     type: "object",
                     properties: {

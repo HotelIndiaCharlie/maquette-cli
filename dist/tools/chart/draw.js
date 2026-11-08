@@ -42,16 +42,10 @@ function shapeBounds(s) {
     }
     return s.rect;
 }
-export function prepareChart(spec, root, readRoots, rect) {
-    const snapshot = structuredClone(spec);
-    validate(snapshot);
-    const rows = loadRows(snapshot, root, readRoots);
-    return { spec: snapshot, plan: plan(snapshot, rows, rect) };
-}
 export async function drawChart(dc, o) {
-    const prepared = o.prepared ?? prepareChart(o.spec, o.root, o.readRoots, o.frame.rect);
-    const p = prepared.plan;
-    const labelId = o.labelChart ?? o.chart;
+    validate(o.spec);
+    const rows = loadRows(o.spec, o.root, o.readRoots);
+    const p = plan(o.spec, rows, o.frame.rect);
     const [fx0, fy0, fx1] = o.frame.rect;
     const spread = o.frame.spread;
     // 1. Set every text in its Chart style, in frames that size themselves to it.
@@ -87,7 +81,7 @@ export async function drawChart(dc, o) {
         const dx = t.x - b[0], dy = t.y - b[1];
         if (Math.abs(dx) > 1e-3 || Math.abs(dy) > 1e-3)
             b2.add("transform.move", { ids: [id], dx, dy });
-        b2.add("object.label", { label: chartLabel(labelId, t.key), ids: [id] });
+        b2.add("object.label", { label: chartLabel(o.chart, t.key), ids: [id] });
     }
     const shapeStep = new Map();
     for (const s of layout.shapes) {
@@ -96,7 +90,7 @@ export async function drawChart(dc, o) {
                 : b2.add("frame.create", { spread, rect: s.rect, shape: s.kind === "ellipse" ? "ellipse" : "rectangle", content: "graphic" });
         shapeStep.set(s.key, step);
         b2.add("style.object.apply", { name: s.style, ids: [ref(step, "id")] });
-        b2.add("object.label", { label: chartLabel(labelId, s.key), ids: [ref(step, "id")] });
+        b2.add("object.label", { label: chartLabel(o.chart, s.key), ids: [ref(step, "id")] });
     }
     const r2 = await dc.batch(b2.commands);
     const shapeId = new Map([...shapeStep].map(([k, s]) => [k, r2[s].id]));
@@ -138,11 +132,11 @@ export async function drawChart(dc, o) {
     b3.add("selection.set", { ids: [...textId.values()] });
     b3.add("object.bringToFront");
     const g = b3.add("object.group", { ids: [...shapeId.values(), ...textId.values()] });
-    b3.add("object.label", { label: chartLabel(labelId), ids: [ref(g, "id")] });
+    b3.add("object.label", { label: chartLabel(o.chart), ids: [ref(g, "id")] });
     b3.add("object.rename", { id: ref(g, "id"), name: `Chart ${o.chart}` });
     b3.add("selection.set", { ids: [] });
     const r3 = await dc.batch(b3.commands);
-    const entry = { chart: o.chart, frame: o.frame.id, page: o.frame.page, spread, rect: o.frame.rect, group: r3[g].id, spec: prepared.spec, items, drawn: new Date().toISOString() };
+    const entry = { chart: o.chart, frame: o.frame.id, page: o.frame.page, spread, rect: o.frame.rect, group: r3[g].id, spec: o.spec, items, drawn: new Date().toISOString() };
     return { entry, check };
 }
 // What the designer changed by hand since the chart was drawn. Children keep their
