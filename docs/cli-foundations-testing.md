@@ -72,7 +72,7 @@ chart_update <id> --data '{"url":"example/data/01-revenue-updated.csv"}'
 save_document
 ```
 
-Se modifichi una barra o il testo di un'etichetta tramite i comandi nativi, l'update deve rifiutare i **ritocchi rilevati**, mantenendo l'originale. Lo spostamento del gruppo intero è invece mantenuto. Non c'è un'opzione force/reset/detach. Il rilevamento corrente controlla geometria, testo visibile, fill/stroke e aggiunte/rimozioni; non rappresenta ancora un contratto completo di conservazione di ogni proprietà di stile. Una perdita di connessione o un fallimento della pulizia richiede ispezione: non ripetere automaticamente l'update.
+Se modifichi una barra o il testo di un'etichetta tramite i comandi nativi, l'update deve rifiutare i **ritocchi rilevati**, mantenendo l'originale. Lo spostamento del gruppo intero è invece mantenuto. Dopo aver mostrato l’elenco dei ritocchi e ricevuto conferma esplicita, è disponibile `chart_update <id> --discard_hand_changes true`. Il successo deve elencare i ritocchi scartati. Conservazione dei ritocchi, reset e detach restano esclusi. Il rilevamento corrente controlla geometria, testo visibile, fill/stroke e aggiunte/rimozioni; non rappresenta ancora un contratto completo di conservazione di ogni proprietà di stile. Una perdita di connessione o un fallimento della pulizia richiede ispezione: non ripetere automaticamente l'update.
 
 ## Prova personale: salvataggio e resume
 
@@ -163,3 +163,9 @@ Per server aggiuntivi, inserisci `.mcp.json` con `mcpServers`; sono supportati s
 ## Compattazione
 
 Dopo diverse conversazioni complete, prova `/compact` oppure `/compact concentrati sul lavoro ancora aperto`. Il contesto deve diventare un riepilogo più i gruppi recenti intatti. Il journal originale resta completo. I test verificano che firme e accoppiamenti chiamata/risultato siano conservati, e che errore o Ctrl-C lascino attivo il contesto precedente. Non c'è compattazione automatica lato client. I risultati pesanti vengono limitati alla prima acquisizione, con riferimenti al contenuto completo, senza riscrivere la storia già inviata.
+
+## Follow-up delle revisioni del 7 novembre
+
+Le correzioni e le prove sono tracciate in [cli-foundations-review-followup.md](plans/cli-foundations-review-followup.md). Ripetere la suite con `node --test --test-concurrency=1 test/unit/*.test.ts` se l’esecuzione parallela mostra le race di avvio già osservate nei test UI/server.
+
+Checklist aggiuntiva per una prova Anthropic live, con credenziali configurate dalla persona: generare alcuni turni con tool e thinking attivo, eseguire `/compact`, continuare con un tool, quindi cambiare modello e ripetere. La richiesta di riepilogo deve contenere solo testo, senza blocchi tool_use/tool_result o thinking storici; i gruppi recenti firmati devono rimanere intatti. Questa prova verifica l’API e la qualità del riepilogo e non è sostituita dai provider scriptati. Nessun esito live Anthropic è dichiarato da questi test automatici.
