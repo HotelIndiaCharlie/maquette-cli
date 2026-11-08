@@ -57,3 +57,32 @@ test("init uses the same resolver including .claude override and bundled catalog
   const names = discoverSkills(temp(), { home: temp() }).skills.map(s => s.name);
   assert.deepEqual(names, ["chart", "designcraft", "init", "report-review"]);
 });
+
+test("a symlinked SKILL.md cannot escape; missing resources hide home paths and resources are discoverable", () => {
+  const dir = temp(), home = temp(), bundled = temp();
+  const outside = put(temp(), "escape", "outside");
+  const base = join(dir, ".claude/skills/escape"); mkdirSync(base, { recursive: true });
+  symlinkSync(join(outside, "SKILL.md"), join(base, "SKILL.md"));
+  assert.match(discoverSkills(dir, { home, bundled }).warnings.join("\n"), /escapes/);
+  put(join(home, ".maquette/skills"), "sample", "body");
+  assert.throws(() => readSkill(dir, "sample", "missing.md", { home, bundled }), { message: "Resource not found in skill sample: missing.md" });
+});
+
+test("bundled references are named by their skill body and project descriptions stay bounded", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs"); const { bundledSkills, skillPrompt } = await import("../../src/skills/resolver.ts");
+  for (const name of readdirSync(bundledSkills)) {
+    const base = join(bundledSkills, name); let files: string[];
+    try { files = readdirSync(join(base, "references")); } catch { continue; }
+    const body = readFileSync(join(base, "SKILL.md"), "utf8");
+    for (const file of files) assert.ok(body.includes(`references/${file}`), `${name} must expose ${file}`);
+  }
+  const dir = temp(); put(join(dir, ".claude/skills"), "brand-check", "body", `name: brand-check\ndescription: ${"x".repeat(1000)}`);
+  const prompt = skillPrompt(discoverSkills(dir)); assert.ok(!prompt.includes("x".repeat(201)));
+});
+
+test("unknown slashes do not title a session and similar skill names are suggested", async () => {
+  const server = fakeServer(); put(join(server.root, ".maquette/skills"), "brand-check", "body");
+  const s = new AgentSession({ server, provider: new FakeProvider([]), settings: settings(), projectFile: join(server.root, "settings.json"), persist: true });
+  const notices: string[] = []; s.on(e => { if (e.type === "notice") notices.push(e.text); });
+  await s.submit("/brand-chek"); assert.ok(notices.some(n => n.includes("Did you mean /brand-check?"))); assert.equal(s.journal!.records.some(r => r.data.sessionTitle), false); s.close();
+});
